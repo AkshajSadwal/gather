@@ -1,0 +1,311 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AccountVisibility {
+  PUBLIC
+  PRIVATE
+}
+enum NotificationType {
+  FOLLOW
+  FOLLOW_REQUEST
+  LIKE
+  COMMENT
+  MENTION
+  MESSAGE
+  STORY_VIEW
+}
+enum MediaType {
+  IMAGE
+  VIDEO
+}
+enum CallType {
+  VOICE
+  VIDEO
+}
+enum CallStatus {
+  CALLING
+  RINGING
+  ACCEPTED
+  REJECTED
+  ENDED
+  FAILED
+}
+
+model User {
+  id                  String   @id @default(cuid())
+  username            String   @unique @db.VarChar(30)
+  email               String   @unique @db.VarChar(254)
+  passwordHash        String?
+  emailVerified       DateTime?
+  image               String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  profile             Profile?
+  followers           Follow[] @relation("followed")
+  following           Follow[] @relation("follower")
+  posts               Post[]
+  likes               Like[]
+  comments            Comment[]
+  bookmarks           Bookmark[]
+  notifications       Notification[] @relation("notificationRecipient")
+  actorNotifications  Notification[] @relation("notificationActor")
+  messages            Message[]
+  conversationLinks   ConversationParticipant[]
+  stories             Story[]
+  storyViews          StoryView[]
+  reels               Reel[]
+  callsInitiated      CallSession[] @relation("callInitiator")
+  callsReceived       CallSession[] @relation("callRecipient")
+
+}
+
+model Profile {
+  id          String @id @default(cuid())
+  userId      String @unique
+  user        User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  displayName String @default("") @db.VarChar(60)
+  bio         String @default("") @db.VarChar(500)
+  avatarUrl   String?
+  website     String? @db.VarChar(2048)
+  visibility  AccountVisibility @default(PUBLIC)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([avatarUrl])
+}
+
+model Follow {
+  id          String @id @default(cuid())
+  followerId  String
+  followedId  String
+  accepted    Boolean @default(true)
+  follower    User @relation("follower", fields: [followerId], references: [id], onDelete: Cascade)
+  followed    User @relation("followed", fields: [followedId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  @@unique([followerId, followedId])
+  @@index([followedId, createdAt])
+  @@index([followerId, createdAt])
+}
+
+model Post {
+  id        String @id @default(cuid())
+  authorId  String
+  author    User @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  caption   String @default("") @db.VarChar(2200)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  media     PostMedia[]
+  likes     Like[]
+  comments  Comment[]
+  bookmarks Bookmark[]
+  hashtags  PostHashtag[]
+  reel      Reel?
+  @@index([authorId, createdAt])
+  @@index([createdAt])
+}
+
+model PostMedia {
+  id        String @id @default(cuid())
+  postId    String
+  post      Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  url       String
+  type      MediaType
+  mimeType  String
+  sizeBytes Int
+  width     Int?
+  height    Int?
+  position  Int @default(0)
+  createdAt DateTime @default(now())
+  @@index([postId, position])
+  @@index([url])
+}
+
+model Like {
+  id        String @id @default(cuid())
+  userId    String
+  postId    String
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post      Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  @@unique([userId, postId])
+  @@index([postId, createdAt])
+}
+
+model Comment {
+  id        String @id @default(cuid())
+  userId    String
+  postId    String
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post      Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  body      String @db.VarChar(1000)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([postId, createdAt])
+}
+
+model Bookmark {
+  id        String @id @default(cuid())
+  userId    String
+  postId    String
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post      Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  @@unique([userId, postId])
+  @@index([userId, createdAt])
+}
+
+model Hashtag {
+  id        String @id @default(cuid())
+  tag       String @unique @db.VarChar(100)
+  posts     PostHashtag[]
+  createdAt DateTime @default(now())
+  @@index([tag])
+}
+
+model PostHashtag {
+  postId    String
+  hashtagId String
+  post      Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  hashtag   Hashtag @relation(fields: [hashtagId], references: [id], onDelete: Cascade)
+  @@id([postId, hashtagId])
+  @@index([hashtagId, postId])
+}
+
+model Notification {
+  id          String @id @default(cuid())
+  recipientId String
+  actorId     String?
+  recipient   User @relation("notificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  actor       User? @relation("notificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+  type        NotificationType
+  entityId    String?
+  readAt      DateTime?
+  createdAt   DateTime @default(now())
+  @@index([recipientId, readAt, createdAt])
+}
+
+model Conversation {
+  id           String @id @default(cuid())
+  directKey     String? @unique
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  participants ConversationParticipant[]
+  messages     Message[]
+  @@index([updatedAt])
+}
+
+model ConversationParticipant {
+  id             String @id @default(cuid())
+  conversationId String
+  userId         String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt       DateTime @default(now())
+  @@unique([conversationId, userId])
+  @@index([userId, conversationId])
+}
+
+model Message {
+  id             String @id @default(cuid())
+  conversationId String
+  senderId       String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  body           String @db.VarChar(4000)
+  createdAt      DateTime @default(now())
+  deliveredAt    DateTime?
+  reads          MessageRead[]
+  @@index([conversationId, createdAt])
+}
+
+model MessageRead {
+  id        String @id @default(cuid())
+  messageId String
+  userId    String
+  message   Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  readAt    DateTime @default(now())
+  @@unique([messageId, userId])
+  @@index([userId, readAt])
+}
+
+model Story {
+  id        String @id @default(cuid())
+  authorId  String
+  author    User @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  caption   String @default("") @db.VarChar(500)
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  media     StoryMedia[]
+  views     StoryView[]
+  @@index([authorId, expiresAt])
+  @@index([expiresAt])
+}
+
+model StoryMedia {
+  id        String @id @default(cuid())
+  storyId   String
+  story     Story @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  url       String
+  type      MediaType
+  mimeType  String
+  sizeBytes Int
+  createdAt DateTime @default(now())
+  @@index([storyId])
+  @@index([url])
+}
+
+model StoryView {
+  id        String @id @default(cuid())
+  storyId   String
+  viewerId  String
+  story     Story @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  viewer    User @relation(fields: [viewerId], references: [id], onDelete: Cascade)
+  viewedAt  DateTime @default(now())
+  @@unique([storyId, viewerId])
+  @@index([storyId, viewedAt])
+}
+
+model Reel {
+  id        String @id @default(cuid())
+  authorId  String
+  postId    String? @unique
+  caption   String @default("") @db.VarChar(2200)
+  createdAt DateTime @default(now())
+  author    User @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  post      Post? @relation(fields: [postId], references: [id], onDelete: Cascade)
+  media     ReelMedia[]
+  @@index([createdAt])
+  @@index([authorId, createdAt])
+}
+
+model ReelMedia {
+  id        String @id @default(cuid())
+  reelId    String
+  reel      Reel @relation(fields: [reelId], references: [id], onDelete: Cascade)
+  url       String
+  mimeType  String
+  sizeBytes Int
+  createdAt DateTime @default(now())
+  @@index([reelId])
+  @@index([url])
+}
+
+model CallSession {
+  id          String @id @default(cuid())
+  initiatorId String
+  recipientId String
+  initiator   User @relation("callInitiator", fields: [initiatorId], references: [id], onDelete: Cascade)
+  recipient   User @relation("callRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  type        CallType
+  status      CallStatus @default(CALLING)
+  startedAt   DateTime @default(now())
+  endedAt     DateTime?
+  @@index([initiatorId, startedAt])
+  @@index([recipientId, startedAt])
+  @@index([status, startedAt])
+}

@@ -1,0 +1,59 @@
+'use client';
+
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { signOut, useSession } from 'next-auth/react';
+import { useEffect, useState } from 'react';
+import { Bell, Compass, House, LogOut, Menu, MessageCircle, Plus, Search, Settings, Sparkles, Video, X } from 'lucide-react';
+import Avatar from './Avatar';
+import Composer from './Composer';
+import { api } from '../lib/api';
+
+const links = [
+  { href: '/', label: 'Home', icon: House }, { href: '/explore', label: 'Explore', icon: Compass },
+  { href: '/search', label: 'Search', icon: Search }, { href: '/reels', label: 'Reels', icon: Video },
+  { href: '/messages', label: 'Messages', icon: MessageCircle }
+];
+
+export default function AppShell({ children, right = false }) {
+  const pathname = usePathname();
+  const { data: session } = useSession();
+  const [compose, setCompose] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [mobileMenu, setMobileMenu] = useState(false);
+  const me = session?.user;
+
+  useEffect(() => { const listener = () => setCompose(true); window.addEventListener('social:compose', listener); return () => window.removeEventListener('social:compose', listener); }, []);
+  useEffect(() => { if (!notificationsOpen || !me) return; api('/notifications').then((data) => setNotifications(data.notifications || [])).catch(() => {}); }, [notificationsOpen, me]);
+
+  const actionLink = (href, label, icon, selected = false) => {
+    const Icon = icon;
+    return <Link key={href} href={href} onClick={() => setMobileMenu(false)} className={`flex items-center gap-4 rounded-2xl px-4 py-3.5 text-[15px] transition ${selected ? 'bg-white font-semibold text-ink shadow-sm' : 'text-ink/75 hover:bg-white hover:text-ink'}`}><Icon size={21} strokeWidth={selected ? 2.5 : 1.8} /><span>{label}</span></Link>;
+  };
+
+  return <div className="mx-auto min-h-screen max-w-[1440px]">
+    <aside className="fixed inset-y-0 left-[max(0px,calc((100vw-1440px)/2))] z-30 hidden w-[248px] flex-col border-r border-line bg-paper px-4 py-8 lg:flex">
+      <Link href="/" className="mb-10 flex items-center gap-2 px-3"><span className="grid h-9 w-9 place-items-center rounded-xl bg-moss text-white"><Sparkles size={19} /></span><span className="text-[22px] font-bold tracking-tight">gather<span className="text-coral">.</span></span></Link>
+      <nav className="grid gap-1">{links.map(({ href, label, icon }) => actionLink(href, label, icon, pathname === href || (href !== '/' && pathname.startsWith(href))))}
+        <button onClick={() => setNotificationsOpen(!notificationsOpen)} className="flex items-center gap-4 rounded-2xl px-4 py-3.5 text-left text-[15px] text-ink/75 transition hover:bg-white"><Bell size={21} strokeWidth={1.8} />Updates</button>
+        <button onClick={() => setCompose(true)} className="flex items-center gap-4 rounded-2xl px-4 py-3.5 text-left text-[15px] text-ink/75 transition hover:bg-white"><Plus size={21} />Create</button>
+        <Link href={me?.username ? `/profile/${me.username}` : '/login'} className={`flex items-center gap-3 rounded-2xl px-4 py-3.5 text-[15px] transition hover:bg-white ${pathname.startsWith('/profile') ? 'bg-white font-semibold' : 'text-ink/75'}`}><Avatar src={me?.image} name={me?.name || me?.email} size="xs" /><span>Profile</span></Link>
+      </nav>
+      <div className="mt-auto grid gap-2">
+        <Link href="/settings" className="flex items-center gap-4 rounded-2xl px-4 py-3 text-sm text-ink/70 hover:bg-white"><Settings size={20} />Settings</Link>
+        {me ? <button onClick={() => signOut({ callbackUrl: '/login' })} className="flex items-center gap-4 rounded-2xl px-4 py-3 text-left text-sm text-ink/70 hover:bg-white"><LogOut size={20} />Sign out</button> : <Link href="/login" className="rounded-2xl bg-moss px-4 py-3 text-center text-sm font-semibold text-white">Sign in</Link>}
+      </div>
+    </aside>
+
+    <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-line bg-paper/95 px-4 backdrop-blur lg:hidden">
+      <button aria-label="Open menu" onClick={() => setMobileMenu(!mobileMenu)} className="rounded-full p-2">{mobileMenu ? <X size={21} /> : <Menu size={21} />}</button><Link href="/" className="text-xl font-bold tracking-tight">gather<span className="text-coral">.</span></Link><Link href={me?.username ? `/profile/${me.username}` : '/login'} aria-label="Profile"><Avatar src={me?.image} name={me?.name || me?.email} size="xs" /></Link>
+    </header>
+    {mobileMenu && <div className="fixed inset-0 z-40 bg-black/25 lg:hidden" onClick={() => setMobileMenu(false)}><nav onClick={(event) => event.stopPropagation()} className="h-full w-72 bg-paper p-5 shadow-xl"><Link href="/" className="mb-7 block text-xl font-bold">gather<span className="text-coral">.</span></Link><div className="grid gap-1">{links.map(({ href, label, icon }) => actionLink(href, label, icon, pathname === href))}<button onClick={() => setCompose(true)} className="flex items-center gap-4 rounded-xl px-4 py-3"><Plus size={20} />Create</button>{me && <button onClick={() => signOut({ callbackUrl: '/login' })} className="flex items-center gap-4 rounded-xl px-4 py-3"><LogOut size={20} />Sign out</button>}</div></nav></div>}
+
+    <main className={`min-h-[calc(100vh-64px)] px-4 pb-24 pt-6 lg:ml-[248px] lg:min-h-screen lg:px-10 lg:py-9 ${right ? 'xl:mr-[300px]' : ''}`}>{children}</main>
+    <nav className="fixed inset-x-0 bottom-0 z-30 flex justify-around border-t border-line bg-white/95 px-2 py-2 backdrop-blur lg:hidden">{links.filter(({ href }) => href !== '/search').map(({ href, label, icon }) => { const Icon = icon; return <Link aria-label={label} key={href} href={href} className={`grid min-w-12 place-items-center rounded-xl p-2 ${pathname === href ? 'text-moss' : 'text-ink/65'}`}><Icon size={22} strokeWidth={pathname === href ? 2.5 : 1.8} /></Link>; })}<button aria-label="Create" onClick={() => setCompose(true)} className="grid min-w-12 place-items-center rounded-xl p-2 text-ink/65"><Plus size={22} /></button></nav>
+    {notificationsOpen && <div className="fixed inset-0 z-40 bg-black/10" onClick={() => setNotificationsOpen(false)}><section onClick={(e) => e.stopPropagation()} className="absolute bottom-16 left-3 max-h-[70vh] w-[min(390px,94vw)] overflow-auto rounded-3xl border border-line bg-white p-5 shadow-soft lg:bottom-6 lg:left-[260px]"><div className="mb-4 flex items-center justify-between"><h2 className="text-lg font-semibold">Updates</h2><div className="flex gap-3"><button onClick={async () => { try { await api('/notifications/all/read', { method: 'POST' }); setNotifications((all) => all.map((item) => ({ ...item, readAt: item.readAt || new Date().toISOString() }))); } catch {} }} className="text-xs font-medium text-moss">Mark all read</button><button onClick={() => setNotificationsOpen(false)} aria-label="Close"><X size={19} /></button></div></div>{notifications.length ? notifications.map((item) => <button key={item.id} onClick={async () => { if (item.readAt) return; try { await api(`/notifications/${item.id}/read`, { method: 'POST' }); setNotifications((all) => all.map((row) => row.id === item.id ? { ...row, readAt: new Date().toISOString() } : row)); } catch {} }} className="flex w-full items-center gap-3 border-b border-line py-3 text-left text-sm"><Avatar src={item.actor?.image} name={item.actor?.username} size="xs" /><p className="flex-1"><b>{item.actor?.username || 'Someone'}</b> {item.type === 'FOLLOW' ? 'started following you' : item.type === 'FOLLOW_REQUEST' ? 'requested to follow you' : item.type === 'LIKE' ? 'liked your post' : item.type === 'COMMENT' ? 'commented on your post' : item.type === 'MENTION' ? 'mentioned you' : 'viewed your story'}</p>{!item.readAt && <span className="h-2 w-2 rounded-full bg-coral" />}</button>) : <p className="py-8 text-center text-sm text-ink/55">You’re all caught up.</p>}</section></div>}
+    {compose && <Composer onClose={() => setCompose(false)} />}
+  </div>;
+}

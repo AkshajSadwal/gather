@@ -1,0 +1,15 @@
+node_modules/
+**/node_modules/
+.next/
+out/
+coverage/
+.env
+.env.*
+!.env.example
+uploads/*
+!uploads/.gitkeep
+*.log
+.DS_Store
+.turbo/
+*.tsbuildinfo
+prisma/dev.db

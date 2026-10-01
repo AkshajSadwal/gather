@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: #f7f8f4; color: #15251f; font-family: Arial, Helvetica, sans-serif; }
+button, input, textarea { font: inherit; }
+button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px solid #88bda4; outline-offset: 2px; }
+::selection { background: #cce7d8; }
+.story-ring { background: conic-gradient(#e8745c, #ebbd64, #df6c80, #8658a9, #e8745c); padding: 2.5px; }
+.skeleton { background: linear-gradient(90deg, #eef0eb 25%, #f7f8f4 50%, #eef0eb 75%); background-size: 200% 100%; animation: shimmer 1.25s infinite; }
+@keyframes shimmer { to { background-position-x: -200%; } }
+@keyframes story-progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.hide-scrollbar { scrollbar-width: none; }
+.hide-scrollbar::-webkit-scrollbar { display: none; }
