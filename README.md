@@ -5,7 +5,7 @@ Gather is an original, responsive social app built with a Next.js App Router fro
 ## Requirements
 
 - Node.js 20 or newer
-- pnpm 10 or newer (the workspace was built with pnpm 11)
+- npm 10 or newer
 - Docker Desktop with Compose, or a compatible local PostgreSQL 16 instance
 
 ## Local setup (PowerShell)
@@ -13,7 +13,7 @@ Gather is an original, responsive social app built with a Next.js App Router fro
 Run these commands from `A:\in\instagram-clone`.
 
 ```powershell
-Copy-Item .env.example .env
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
 Edit `.env`. Generate two independent secrets (do not reuse either one):
@@ -27,22 +27,22 @@ Put one generated value in `AUTH_SECRET` and another in `INTERNAL_AUTH_SECRET`. 
 Install packages and start the local PostgreSQL service:
 
 ```powershell
-pnpm install
+npm install
 docker compose up -d postgres
 ```
 
 Create the schema and realistic demo data:
 
 ```powershell
-pnpm db:migrate
-pnpm db:seed
+npm run db:migrate
+npm run db:seed
 ```
 
 Start the Express backend in one terminal and the Next.js frontend in another:
 
 ```powershell
-pnpm dev:backend
-pnpm dev:frontend
+npm run dev:backend
+npm run dev:frontend
 ```
 
 Open [http://localhost:3000](http://localhost:3000). Use `localhost` for both services rather than switching one URL to `127.0.0.1`; the Auth.js HttpOnly cookie must be sent to the API on the same host.
@@ -62,13 +62,14 @@ Restart the frontend after changing environment values. The OAuth secret and `IN
 ## Useful commands
 
 ```powershell
-pnpm db:generate
-pnpm db:migrate --name describe_change
-pnpm db:seed
-pnpm --filter @instagram-clone/backend test
-pnpm --filter @instagram-clone/backend lint
-pnpm lint
-pnpm build
+npm run db:generate
+npm run db:migrate -- --name describe_change
+npm run db:seed
+npm test
+npm run lint --workspace=@instagram-clone/backend
+npm run lint --workspace=@instagram-clone/frontend
+npm run lint
+npm run build
 ```
 
 `GET http://localhost:4000/health` reports API and database status. The upload service writes validated files below `uploads/`; the directory is ignored except for its placeholder. The current limits are 12 MB per image and 120 MB per video.

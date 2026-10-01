@@ -4,8 +4,8 @@
 
 1. Copy `.env.example` to `.env`; generate independent `AUTH_SECRET` and `INTERNAL_AUTH_SECRET` values.
 2. Start PostgreSQL with `docker compose up -d postgres`.
-3. Install with `pnpm install`, apply the checked-in initial migration with `pnpm db:migrate`, and load demo fixtures with `pnpm db:seed`.
-4. In separate terminals run `pnpm dev:backend` and `pnpm dev:frontend`.
+3. Install with `npm install`, apply the checked-in initial migration with `npm run db:migrate`, and load demo fixtures with `npm run db:seed`.
+4. In separate terminals run `npm run dev:backend` and `npm run dev:frontend`.
 
 The backend loads the root `.env` from `backend/src/config/env.js`. Prisma reads the same root file because `prisma/schema.prisma` is in the workspace root. Avoid using `127.0.0.1` for one service and `localhost` for another; the Auth.js session cookie is host-only.
 
@@ -20,11 +20,11 @@ The backend loads the root `.env` from `backend/src/config/env.js`. Prisma reads
 ## Validation
 
 ```powershell
-pnpm --filter @instagram-clone/backend lint
-pnpm --filter @instagram-clone/backend test
-pnpm lint
-pnpm build
-pnpm db:status
+npm run lint --workspace=@instagram-clone/backend
+npm test
+npm run lint
+npm run build
+npm run db:status
 Invoke-RestMethod http://localhost:4000/health
 ```
 

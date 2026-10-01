@@ -31,7 +31,9 @@ async function create(req, res) {
       return tx.reel.create({ data: { authorId: req.user.id, postId: post.id, caption, media: { create: { url: media.url, mimeType: media.mimeType, sizeBytes: media.sizeBytes } } }, include: { media: true } });
     });
   } catch (error) { await removeLocal(media.url).catch(() => {}); throw error; }
-  return ok(res, { reel }, 201);
+  const response = { ...reel };
+  delete response.authorId;
+  return ok(res, { reel: response }, 201);
 }
 
 module.exports = { list, create };
