@@ -1,6 +1,6 @@
 # Gather
 
-Gather is an original, responsive social app built with a Next.js App Router frontend and a separate Express, Socket.IO, and Prisma backend. It includes credential and Google authentication, a PostgreSQL data model, profiles and follows, posts and comments, search, stories, reels, notifications, direct messages, and one-to-one WebRTC call signaling.
+Gather is an original, responsive social app built with a Next.js App Router frontend and a separate Express, Socket.IO, and Prisma backend. It includes credential and Google authentication, profiles and follows, posts and comments, search, stories, reels, notifications, direct messages, and one-to-one voice/video calls routed through a mediasoup SFU.
 
 ## Requirements
 
@@ -49,6 +49,14 @@ Open [http://localhost:3000](http://localhost:3000). Use `localhost` for both se
 
 The seed creates `maya`, `noah`, `amara`, `leo`, and `sofia` with the shared local-only password `GatherDemo2026!`. These `example.test` accounts are fictional development fixtures. Do not deploy the seed password to a public environment.
 
+## Voice and video calls
+
+The backend starts a configurable mediasoup worker pool and creates one router for each active call. Socket.IO carries authenticated call state and mediasoup negotiation messages; audio/video RTP stays on mediasoup WebRTC transports. Local development defaults to `MEDIASOUP_LISTEN_IP=127.0.0.1`, which is suitable when the browser and backend run on the same machine.
+
+For a server reachable from other devices, set `MEDIASOUP_LISTEN_IP=0.0.0.0`, set `MEDIASOUP_ANNOUNCED_ADDRESS` to the server's reachable address, and allow both UDP and TCP traffic through `MEDIASOUP_RTC_MIN_PORT`–`MEDIASOUP_RTC_MAX_PORT` in the host firewall and network security rules. Do not place a public address in source control. `MEDIASOUP_ENABLE_TCP=true` provides a fallback for clients whose networks block UDP. A failed call is closed after the configured ring timeout or reconnect grace period.
+
+The local `.env.example` documents the complete SFU settings. See the mediasoup lifecycle, recovery, event contract, and single-instance scaling limitation in [ARCHITECTURE.md](ARCHITECTURE.md) and [docs/API.md](docs/API.md).
+
 ## Google OAuth
 
 Username/password registration works without external credentials. To enable Google login, set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, set `NEXT_PUBLIC_GOOGLE_LOGIN=true`, and register this redirect URI in the Google OAuth client:
@@ -78,7 +86,7 @@ npm run build
 
 Auth.js owns login, session creation, expiry, and logout. It stores a 14-day encrypted JWT in an HttpOnly, SameSite=Lax cookie. The Express API decrypts and validates that exact Auth.js cookie using the server-only `AUTH_SECRET`; it does not mint a bearer token for browser JavaScript. Credential login is checked by Express with bcrypt, while Google sign-in calls a backend account-sync endpoint protected by `INTERNAL_AUTH_SECRET`. See [ARCHITECTURE.md](ARCHITECTURE.md).
 
-For deployment, use HTTPS, strong unique secrets, a managed PostgreSQL database, a persistent or object-backed upload store, and a TURN relay for reliable calls across restrictive networks. Configure frontend/backend origins consistently. The bundled development Compose file is not a production database deployment.
+For deployment, use HTTPS, strong unique secrets, a managed PostgreSQL database, a persistent or object-backed upload store, and an externally reachable mediasoup host with its configured RTC port range open. Configure frontend/backend origins consistently. The bundled development Compose file is not a production database deployment.
 
 ## Project notes
 

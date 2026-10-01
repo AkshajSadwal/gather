@@ -32,6 +32,8 @@ enum CallStatus {
   CALLING
   RINGING
   ACCEPTED
+  CONNECTING
+  CONNECTED
   REJECTED
   ENDED
   FAILED
@@ -196,6 +198,7 @@ model Conversation {
   updatedAt    DateTime @updatedAt
   participants ConversationParticipant[]
   messages     Message[]
+  calls        CallSession[]
   @@index([updatedAt])
 }
 
@@ -296,16 +299,20 @@ model ReelMedia {
 }
 
 model CallSession {
-  id          String @id @default(cuid())
-  initiatorId String
-  recipientId String
-  initiator   User @relation("callInitiator", fields: [initiatorId], references: [id], onDelete: Cascade)
-  recipient   User @relation("callRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
-  type        CallType
-  status      CallStatus @default(CALLING)
-  startedAt   DateTime @default(now())
-  endedAt     DateTime?
+  id            String @id @default(cuid())
+  initiatorId   String
+  recipientId   String
+  conversationId String?
+  initiator     User @relation("callInitiator", fields: [initiatorId], references: [id], onDelete: Cascade)
+  recipient     User @relation("callRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  conversation  Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  type          CallType
+  status        CallStatus @default(CALLING)
+  failureReason String? @db.VarChar(240)
+  startedAt     DateTime @default(now())
+  endedAt       DateTime?
   @@index([initiatorId, startedAt])
   @@index([recipientId, startedAt])
   @@index([status, startedAt])
+  @@index([conversationId, startedAt])
 }

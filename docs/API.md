@@ -54,12 +54,26 @@ Connect to the backend with credentials enabled. Socket authentication uses the 
 | `message:delivered` | server → sender | `{ conversationId, messageId }` when recipient is online |
 | `message:read` | server → sender | `{ conversationId, userId, messageIds, readAt }` |
 | `typing:start`, `typing:stop` | both | `{ conversationId, userId }`; server verifies membership |
-| `call:offer` | client → server; server → callee | `{ toUserId, conversationId, type, offer }`; type is `VOICE` or `VIDEO` |
-| `call:ringing` | server → callee | `{ callId, fromUserId, type, offer }` |
-| `call:accepted` | client/server | Acceptance state notification |
-| `call:answer` | client/server | `{ callId, answer }` SDP relayed to the other participant |
-| `call:ice-candidate` | client/server | `{ callId, candidate }` relayed only to the other call participant |
-| `call:rejected` | client/server | Callee declines; persisted as rejected |
-| `call:ended` | client/server | Hangup, timeout, or disconnect cleanup |
+| `call:start` | client → server | `{ toUserId, conversationId, type }`; verifies both conversation members, rejects busy users, persists the call, and emits `call:ring` to the callee. Type is `VOICE` or `VIDEO`. |
+| `call:ring` | server → callee | `{ callId, fromUserId, fromUser, conversationId, type, status }`; contains no SDP or media data. |
+| `call:accept` / `call:reject` | callee → server | `{ callId }`; serialized so only one terminal/accepted transition wins. |
+| `call:cancel` | caller → server | `{ callId }`; cancels an outgoing call before acceptance. |
+| `call:end` | either participant → server | `{ callId }`; ends an accepted call. During ringing it maps to caller cancellation or callee decline, and is used as best-effort page-hide cleanup. |
+| `call:state` | server → participants | `{ callId, status, type, conversationId }`; status is `CALLING`, `RINGING`, `ACCEPTED`, `CONNECTING`, or `CONNECTED`. |
+| `call:accepted`, `call:rejected`, `call:ended` | server → participants | Lifecycle notifications. `call:ended` includes terminal `status` and a safe `reason`. |
+| `call:resume` | client → server | `{ callId }`; authenticates membership, rebinds the participant to the new socket, and resets that peer's old transports. |
+| `mediasoup:get-router-capabilities` | client → server | `{ callId }`; returns `{ rtpCapabilities }` for the call router. |
+| `mediasoup:create-transport` | client → server | `{ callId, direction: "send"|"recv" }`; returns `{ transport }` with ICE and DTLS parameters/candidates. Concurrent duplicate requests return the existing owned transport. |
+| `mediasoup:connect-transport` | client → server | `{ callId, transportId, dtlsParameters }`; validates that the authenticated peer owns the transport. |
+| `mediasoup:produce` | client → server | `{ callId, transportId, kind, rtpParameters }`; audio is required and video is allowed only in a video call. Returns producer ID. |
+| `media:producer-created`, `media:producer-closed`, `media:producer-state` | server → other peer | Producer lifecycle notifications `{ callId, producerId, userId, kind, paused }`. |
+| `mediasoup:consume` | client → server | `{ callId, transportId, producerId, rtpCapabilities }`; only a producer owned by the other call peer can be consumed. Consumer is created paused. |
+| `mediasoup:resume-consumer`, `mediasoup:close-consumer` | client → server | `{ callId, consumerId }`; checks consumer ownership before resuming or closing. |
+| `mediasoup:list-producers` | client → server | `{ callId }`; returns current remote producer metadata for missed-event/reconnect recovery. |
+| `media:pause-producer`, `media:resume-producer` | client → server | `{ callId, producerId }`; only the owning peer can change microphone/camera forwarding state. |
+| `peer:joined`, `peer:reconnecting`, `peer:reconnected`, `peer:left` | server → participants | Peer lifecycle updates; reconnect is bounded by `CALL_RECONNECT_GRACE_MS`. |
+| `media:transport-failed` | server → owner | `{ callId, transportId, reason }`; client makes one bounded recovery attempt, then ends the call if recovery fails. |
 
-Audio/video tracks use browser WebRTC and never pass through Socket.IO. The included single-process server keeps live calls and presence in memory; scale-out requires shared state and a Socket.IO adapter.
+Every client → server call event is authenticated from the Auth.js cookie, validates its payload, checks call membership, and acknowledges `{ data }` or `{ error: { code, message } }`. Transport, producer, and consumer IDs are resolved from the authenticated peer's server-side resource maps. SDP offer/answer and ICE candidate relay events are not used by the SFU implementation. Browser audio/video RTP uses mediasoup WebRTC transports and never passes through Socket.IO or PostgreSQL.
+
+Worker/router/room/peer lifecycle, reconnect recovery, cleanup, environment values, and production port requirements are documented in [ARCHITECTURE.md](../ARCHITECTURE.md#mediasoup-sfu). The current single-process server keeps calls and presence in memory; scale-out requires distributed call state and a shared Socket.IO adapter.

@@ -9,6 +9,7 @@ const { encode } = backendRequire('@auth/core/jwt');
 const { normalizeEmail, normalizeUsername, validUsername } = require('../backend/src/utils/normalize');
 const { identify } = require('../backend/src/services/storage');
 const { sessionUserFromCookie } = require('../backend/src/middleware/auth');
+const { MediasoupService } = require('../backend/src/services/mediasoupService');
 
 test('account identifiers normalize consistently and usernames are validated', () => {
   assert.equal(normalizeUsername('  Ｍaya.Name  '), 'maya.name');
@@ -35,4 +36,32 @@ test('backend accepts only valid, unexpired Auth.js session cookies', async () =
   assert.equal(await sessionUserFromCookie(`${name}=not-a-token`), null);
   const expired = await encode({ token: { sub: 'user-unit-2' }, secret: process.env.AUTH_SECRET, salt: name, maxAge: -120 });
   assert.equal(await sessionUserFromCookie(`${name}=${encodeURIComponent(expired)}`), null);
+});
+
+test('mediasoup worker creates one room with deduplicated send and receive transports and closes cleanly', async () => {
+  const config = { workerCount: 1, rtcMinPort: 41040, rtcMaxPort: 41100, listenIp: '127.0.0.1', enableUdp: true, enableTcp: true, preferUdp: true };
+  const io = { to: () => ({ emit: () => {} }) };
+  const service = new MediasoupService({ io, config });
+  try {
+    await service.ready;
+    const [room, duplicateRoom] = await Promise.all([service.getOrCreateRoom('unit-call'), service.getOrCreateRoom('unit-call')]);
+    assert.equal(room, duplicateRoom);
+    assert.ok(room.router.rtpCapabilities.codecs.some((codec) => codec.mimeType === 'audio/opus'));
+    const peer = room.getOrCreatePeer('unit-user', 'unit-socket');
+    const [send, duplicateSend, receive] = await Promise.all([
+      peer.createTransport(room.router, 'unit-call', 'send', config),
+      peer.createTransport(room.router, 'unit-call', 'send', config),
+      peer.createTransport(room.router, 'unit-call', 'recv', config)
+    ]);
+    assert.equal(send, duplicateSend);
+    assert.notEqual(send.id, receive.id);
+    assert.equal(send.appData.direction, 'send');
+    assert.equal(receive.appData.direction, 'recv');
+    assert.ok(send.iceParameters.usernameFragment);
+    await service.closeRoom('unit-call');
+    assert.equal(service.rooms.has('unit-call'), false);
+    assert.equal(room.closed, true);
+  } finally {
+    await service.close();
+  }
 });
