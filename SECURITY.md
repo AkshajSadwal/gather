@@ -19,6 +19,10 @@ Profile edits and avatar uploads only target the authenticated user. Follow-requ
 
 The `Block` model establishes a server-side interaction boundary. Creating a block removes both existing follow edges between the pair. Future follow, message, call, post/story/reel/media access and relevant discovery are rejected or filtered across the blocked boundary. Unblocking does not recreate the former follow relationship.
 
+## Reports
+
+`POST /api/reports` requires a session and is rate-limited (20/hour). Reporter identity always comes from `req.user.id`, never the payload. Post reports run the same visibility/block check as reading the post, so a report cannot be used to confirm the existence or content of a private post. Reporters are never exposed to the reported account, and open duplicate reports from one reporter for one target are collapsed. A database `CHECK` prevents self-reports as defense in depth. Report records can contain sensitive free text; restrict database access accordingly and apply your retention policy.
+
 ## Input and upload protection
 
 Zod validates structured API and Socket.IO payloads. Uploads are limited by MIME type, file signature, count and size. Files are first written to a temporary random filename, then moved into the upload directory after validation. Uploaded paths are served only through authorization checks.

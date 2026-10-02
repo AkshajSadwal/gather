@@ -11,6 +11,8 @@ Last reviewed: 2026-10-03
 - Local media storage behind a storage service with MIME/signature/size checks and authorization-gated `/uploads`.
 - Server-side block system that removes existing follow edges in both directions and blocks follow/message/call/content/media access across the blocked boundary.
 - Availability endpoints have dedicated rate limiting. Notification unread totals are available to the UI so Updates can show a badge.
+- Settings includes a **Blocked accounts** section (`GET /api/blocks`) where blocked accounts can be reviewed and unblocked.
+- Users can **report** accounts (profile) and posts (post menu). Reports are stored privately in a `Report` table with a status workflow; repeat reports for the same open target are deduplicated and reports are rate-limited.
 
 ## Recent hardening/features
 
@@ -25,10 +27,18 @@ Last reviewed: 2026-10-03
 
 The source changes were reviewed for consistency and JavaScript/JSX syntax should be re-run in the user's working copy after applying this update. Full live PostgreSQL/mediasoup/Playwright validation is environment-dependent and is not claimed for this patch artifact.
 
+## Latest pass (2026-10-03, second update)
+
+- Added `GET /api/blocks` and the Blocked accounts section in Settings.
+- Added `Report` model + migration `20261003120000_user_and_post_reports`, `POST /api/reports`, a shared `ReportDialog` component, a Report button on profiles and a "Report post" item in the post menu.
+- Added integration coverage (blocked list, report validation/dedupe/visibility) and a unit test for the report payload schema.
+- Validation in the packaging environment was limited to JavaScript/JSX syntax checks and a controller smoke test with an in-memory fake database. Run `npm run db:generate`, `npm run db:migrate`, `npm test`, `npm run lint` and `npm run build` in your working copy.
+
 ## Known limits
 
 - Google OAuth needs real provider credentials to exercise the full flow.
 - TURN is not configured by default.
 - Presence and live call rooms are single-process in memory.
 - Story/file physical cleanup and production-grade media processing are still follow-up work.
-- Production moderation/reporting and blocked-user management UI remain to be expanded.
+- Reports have no admin review UI or endpoints yet (review via the database), no reporter notifications, and no automated action on reported content.
+- Comments, stories, reels and direct messages cannot be reported individually yet; report the account or the post instead.

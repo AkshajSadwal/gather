@@ -17,7 +17,9 @@ JSON success responses use `{ "data": ... }`; failures use `{ "error": { "code":
 | GET | `/api/users/check-email?email=` | Rate-limited email availability |
 | GET/PATCH | `/api/users/:username` / `/api/users/me/profile` | Read profile / update only current user |
 | POST | `/api/users/me/avatar` | Upload only current user's avatar |
+| GET | `/api/blocks` | Accounts the current user has blocked (newest first, max 200); never lists who blocked you |
 | POST | `/api/blocks/:username/toggle` | Block/unblock another account; removes mutual follow edges when blocking |
+| POST | `/api/reports` | Report an account (`{ username, reason, details? }`) or a post (`{ postId, reason, details? }`); rate-limited |
 | GET | `/api/users/:username/followers` | Accepted followers, subject to privacy/block checks |
 | GET | `/api/users/:username/following` | Accepted following, subject to privacy/block checks |
 | POST | `/api/follows/:username/toggle` | Follow, request, cancel, or unfollow |
@@ -42,6 +44,19 @@ JSON success responses use `{ "data": ... }`; failures use `{ "error": { "code":
 | POST/DELETE | `/api/stories/:id/view` / `/api/stories/:id` | Record view / delete own story |
 | GET | `/api/stories/:id/viewers` | Story owner viewer list |
 | GET/POST | `/api/reels` | Visible reels / create reel |
+
+## Report rules
+
+`POST /api/reports` takes exactly one target (`username` or `postId`), a `reason` (`SPAM`, `HARASSMENT`, `HATE_OR_ABUSE`, `NUDITY_OR_SEXUAL`, `VIOLENCE`, `SELF_HARM`, `IMPERSONATION`, `OTHER`) and optional `details` (max 1000 characters).
+
+- Returns `201` with `{ report, duplicate: false }` for a new report.
+- If the same reporter already has an open (`OPEN`/`REVIEWING`) report for the same target, returns `200` with the existing report and `duplicate: true` rather than creating another.
+- Self-reports are rejected (`CANNOT_REPORT_SELF`).
+- A post can only be reported by someone allowed to view it, so reports cannot probe private posts or content across a block boundary (`PRIVATE_ACCOUNT` / `BLOCKED`).
+- The reported account is never told who reported them. A post report also records the post author as the report's `targetUserId`.
+- Limited to 20 reports per hour per client.
+
+There is no admin endpoint or UI yet; reports are reviewed directly in the database (`Report.status`: `OPEN`, `REVIEWING`, `RESOLVED`, `DISMISSED`).
 
 ## Block rules
 

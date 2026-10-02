@@ -10,6 +10,7 @@ const { normalizeEmail, normalizeUsername, validUsername } = require('../backend
 const { identify } = require('../backend/src/services/storage');
 const { sessionUserFromCookie, SESSION_COOKIE_NAME } = require('../backend/src/middleware/auth');
 const { MediasoupService } = require('../backend/src/services/mediasoupService');
+const { reportSchema, REPORT_REASONS } = require('../backend/src/utils/reportSchema');
 
 test('account identifiers normalize consistently and usernames are validated', () => {
   assert.equal(normalizeUsername('  Ｍaya.Name  '), 'maya.name');
@@ -79,4 +80,16 @@ test('mediasoup worker creates one room with deduplicated send and receive trans
   } finally {
     await service.close();
   }
+});
+
+test('report payloads require exactly one target, a known reason, and bounded details', () => {
+  assert.equal(reportSchema.safeParse({ username: 'maya', reason: 'SPAM' }).success, true);
+  assert.equal(reportSchema.safeParse({ postId: 'abc123', reason: 'OTHER', details: 'why' }).success, true);
+  assert.equal(reportSchema.safeParse({ reason: 'SPAM' }).success, false);
+  assert.equal(reportSchema.safeParse({ username: 'maya', postId: 'abc123', reason: 'SPAM' }).success, false);
+  assert.equal(reportSchema.safeParse({ username: 'maya', reason: 'BOGUS' }).success, false);
+  assert.equal(reportSchema.safeParse({ username: 'maya', reason: 'SPAM', details: 'x'.repeat(1001) }).success, false);
+  assert.equal(reportSchema.parse({ username: 'maya', reason: 'SPAM', details: '  padded  ' }).details, 'padded');
+  assert.equal(reportSchema.parse({ username: 'maya', reason: 'SPAM' }).details, '');
+  assert.equal(REPORT_REASONS.length, 8);
 });

@@ -53,7 +53,7 @@ Put different values in `AUTH_SECRET` and `INTERNAL_AUTH_SECRET`.
 
 ## Privacy and safety
 
-Gather supports public/private accounts and a user-to-user block system. Blocking is enforced server-side and removes existing follow relationships in both directions. Blocked users cannot follow, message, call, or retrieve private content across the blocked boundary. The UI exposes Block/Unblock on another user's profile.
+Gather supports public/private accounts and a user-to-user block system. Blocking is enforced server-side and removes existing follow relationships in both directions. Blocked users cannot follow, message, call, or retrieve private content across the blocked boundary. The UI exposes Block/Unblock on another user's profile, and Settings lists blocked accounts with an Unblock action. Accounts and posts can be reported from the profile page and post menu; reports are stored privately for review (there is no moderator UI yet).
 
 This is an application-level privacy system, not a substitute for deployment-level access controls, moderation, abuse handling, or legal/privacy policy.
 

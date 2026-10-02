@@ -61,6 +61,8 @@ At minimum, test two separate accounts and verify:
 - pending follow requests appear only for the target user
 - a blocked relationship prevents follow/message/call/content access
 - a blocked user's media URL cannot be fetched through `/uploads/*`
+- blocked accounts appear in Settings → Blocked accounts for the blocker only, and Unblock removes them
+- reporting an account/post creates one `Report` row; repeating it returns the existing report; reporting yourself or a post you cannot view is rejected
 
 ## Deployment notes
 

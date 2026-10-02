@@ -31,6 +31,7 @@ Key rules:
 - `User.username` and `User.email` are normalized and database-unique.
 - `Follow(followerId, followedId)` is unique; `accepted=false` represents a private-account request.
 - `Block(blockerId, blockedId)` is unique and is used to enforce an interaction/privacy boundary.
+- `Report(reporterId, targetUserId, postId?)` stores private user/post reports with a `status` workflow (`OPEN` → `REVIEWING` → `RESOLVED`/`DISMISSED`). Post reports also set `targetUserId` to the post author so all reports about an account can be queried together.
 - Post/media, story/media, and reel/media are separate tables so one content item can own multiple media records.
 - Messages are stored before Socket.IO broadcast.
 - `MessageRead` stores per-user read state.

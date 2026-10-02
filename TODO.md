@@ -7,13 +7,13 @@
 - Move local uploads to an S3-compatible/object-storage adapter and add CDN delivery.
 - Add malware scanning, deeper media codec/signature validation, transcoding, thumbnails, quotas, and cleanup jobs.
 - Add email verification, account recovery, and a documented password/session policy.
-- Add reporting/moderation workflows and an abuse-response path.
+- Build moderator tooling on top of the `Report` table: an admin role, a review queue, status changes, content takedown, and repeat-offender handling. Add reporter-facing outcome notices and an abuse-response path/SLA.
 - Add distributed Socket.IO/presence/call coordination before running multiple backend instances.
 - Add rate-limit state shared across instances when distributed deployment is introduced.
 
 ## Product improvements
 
-- Add a dedicated blocked-users management screen in Settings.
+- Extend reporting to comments, stories, reels, and direct messages.
 - Add richer privacy controls for who can message, mention, or interact with an account.
 - Add message delivery reliability when a browser is offline for an extended period.
 - Add stronger feed/reel ranking and media preloading when real traffic requires it.

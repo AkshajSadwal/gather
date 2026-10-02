@@ -10,10 +10,12 @@ const messages = require('../controllers/messageController');
 const stories = require('../controllers/storyController');
 const reels = require('../controllers/reelController');
 const notifications = require('../controllers/notificationController');
+const reports = require('../controllers/reportController');
 
 const router = express.Router();
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: 'draft-8', legacyHeaders: false });
 const availabilityLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: 'draft-8', legacyHeaders: false });
+const reportLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 20, standardHeaders: 'draft-8', legacyHeaders: false });
 const writeLimiter = rateLimit({ windowMs: 60 * 1000, limit: 50, standardHeaders: 'draft-8', legacyHeaders: false });
 const route = (handler) => asyncHandler(handler);
 const maybeAuth = async (req, _res, next) => {
@@ -33,12 +35,14 @@ router.patch('/users/me/profile', requireAuth, writeLimiter, route(users.updateP
 router.post('/users/me/avatar', requireAuth, writeLimiter, upload.single('media'), route(users.updateAvatar));
 router.post('/follows/:username/toggle', requireAuth, writeLimiter, route(users.follow));
 router.delete('/follows/followers/:username', requireAuth, writeLimiter, route(users.removeFollower));
+router.get('/blocks', requireAuth, route(users.listBlocks));
 router.post('/blocks/:username/toggle', requireAuth, writeLimiter, route(users.toggleBlock));
 router.get('/users/:username/followers', maybeAuth, route(users.listRelation));
 router.get('/users/:username/following', maybeAuth, route(users.listRelation));
 router.get('/follows/requests', requireAuth, route(users.followRequests));
 router.patch('/follows/requests/:id', requireAuth, route(users.updateFollowRequest));
 router.get('/search', route(users.search));
+router.post('/reports', requireAuth, reportLimiter, route(reports.create));
 
 router.get('/posts/feed', requireAuth, route(posts.feed));
 router.get('/posts/explore', maybeAuth, route(posts.explore));

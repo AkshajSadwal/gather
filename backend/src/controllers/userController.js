@@ -173,6 +173,16 @@ async function toggleBlock(req, res) {
   return ok(res, { blocked: true, username: target.username });
 }
 
+async function listBlocks(req, res) {
+  const rows = await prisma.block.findMany({
+    where: { blockerId: req.user.id },
+    orderBy: { createdAt: 'desc' },
+    take: 200,
+    select: { id: true, createdAt: true, blocked: { select: { id: true, username: true, image: true, profile: { select: { displayName: true, avatarUrl: true } } } } }
+  });
+  return ok(res, { blocks: rows.map((row) => ({ id: row.id, createdAt: row.createdAt, user: row.blocked })) });
+}
+
 async function search(req, res) {
   const query = String(req.query.q || '').trim().replace(/^[@#]/, '').slice(0, 100);
   if (query.length < 1) return ok(res, { users: [], hashtags: [], posts: [] });
@@ -185,4 +195,4 @@ async function search(req, res) {
   return ok(res, { users, hashtags, posts });
 }
 
-module.exports = { profile, updateProfile, updateAvatar, follow, removeFollower, listRelation, followRequests, updateFollowRequest, toggleBlock, search };
+module.exports = { profile, updateProfile, updateAvatar, follow, removeFollower, listRelation, followRequests, updateFollowRequest, toggleBlock, listBlocks, search };

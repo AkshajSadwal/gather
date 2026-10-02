@@ -1,19 +1,36 @@
-Gather hardening/update pass — 2026-10-03
+Gather update pass — 2026-10-03 (second pass)
 
-Reviewed the uploaded project code and documentation.
+Builds on the previous hardening/block-system pass.
 
-Included changes:
-- Added server-side Block/Unblock feature with PostgreSQL schema + migration.
-- Blocking removes existing follow relationships in both directions.
-- Block boundary enforced across follow, post, story, reel, media, messaging, calling, discovery, and notifications.
-- Added GET /api/notifications/unread and a live Updates unread badge in the frontend.
-- Added rate limiting for username/email availability checks.
-- Profile PATCH no longer accepts avatarUrl; avatar changes stay on the authenticated avatar endpoint.
-- Auth / me counts only accepted followers/following.
-- Google account-sync username creation now retries username conflicts with cryptographically random suffixes.
-- Updated README, ARCHITECTURE, DEVELOPMENT, STATUS, TODO, API, and added SECURITY.md.
-- Added integration coverage for block behavior and notification unread totals.
+New:
+- Blocked accounts management: GET /api/blocks + a "Blocked accounts" section in Settings with Unblock.
+- User/post reporting: new Report model + migration (20261003120000_user_and_post_reports),
+  POST /api/reports (rate-limited, validated, deduplicated while open, visibility-checked for posts),
+  shared ReportDialog component, Report button on profiles, "Report post" in the post menu.
+- Tests: integration coverage for the blocked list and report flow; unit test for the report payload schema.
+- Docs: API.md, STATUS.md, TODO.md, SECURITY.md, ARCHITECTURE.md, README.md, DEVELOPMENT.md updated.
 
-Validation:
-- Backend JavaScript syntax checks passed for modified backend files.
-- Full npm install / database / mediasoup / browser suite was not rerun in this packaging environment, so run the project's normal npm validation commands after replacing the files.
+Files changed/added:
+  prisma/schema.prisma                          (Report model, ReportReason/ReportStatus enums, relations)
+  prisma/migrations/20261003120000_user_and_post_reports/migration.sql   (NEW)
+  backend/src/controllers/reportController.js   (NEW)
+  backend/src/utils/reportSchema.js             (NEW)
+  backend/src/controllers/userController.js     (listBlocks)
+  backend/src/controllers/postController.js     (exports assertPostVisible)
+  backend/src/routes/index.js                   (GET /blocks, POST /reports, report rate limiter)
+  frontend/components/ReportDialog.jsx          (NEW)
+  frontend/components/SettingsView.jsx          (Blocked accounts section)
+  frontend/components/ProfileView.jsx           (Report button)
+  frontend/components/PostCard.jsx              (Report post menu item)
+  tests/backend.integration.test.js, tests/unit.test.js
+
+After replacing files, run (from the project root):
+  npm run db:generate
+  npm run db:migrate        # applies the new migration
+  npm test
+  npm run lint
+  npm run build
+
+Validation performed in the packaging environment: backend JS syntax checks, JSX syntax checks for all
+frontend components, and a controller smoke test against an in-memory fake database. The PostgreSQL
+integration tests, Next.js build, and Playwright suite were NOT run here (no dependencies/network).

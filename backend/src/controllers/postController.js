@@ -188,4 +188,4 @@ async function deleteComment(req, res) {
   return ok(res, { deleted: true });
 }
 
-module.exports = { feed, explore, create, detail, remove, toggleLike, toggleBookmark, listComments, createComment, deleteComment };
+module.exports = { feed, explore, create, detail, remove, toggleLike, toggleBookmark, listComments, createComment, deleteComment, assertPostVisible };
