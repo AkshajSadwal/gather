@@ -1,10 +1,15 @@
 const { decode } = require('@auth/core/jwt');
-const { authSecret } = require('../config/env');
+const { authSecret, nodeEnv } = require('../config/env');
 const { HttpError } = require('../utils/http');
 
-const COOKIE_NAMES = ['authjs.session-token', '__Secure-authjs.session-token', 'next-auth.session-token', '__Secure-next-auth.session-token'];
+// This must exactly match the session cookie name configured by Auth.js in
+// frontend/auth.js. Do not accept legacy NextAuth v4 cookie names here: doing
+// so can let a stale cookie from another app/session identify the wrong user.
+const SESSION_COOKIE_NAME = nodeEnv === 'production'
+  ? '__Secure-authjs.session-token'
+  : 'authjs.session-token';
 
-function getCookie(req, name) {
+function getCookie(req, name = SESSION_COOKIE_NAME) {
   const raw = req.headers.cookie || '';
   const part = raw.split(';').map((item) => item.trim()).find((item) => item.startsWith(`${name}=`));
   return part ? decodeURIComponent(part.slice(name.length + 1)) : null;
@@ -12,17 +17,20 @@ function getCookie(req, name) {
 
 async function sessionUserFromCookie(cookieHeader) {
   if (!authSecret) throw new Error('AUTH_SECRET is not configured');
+
+  // Only decode the cookie that this application actually issues. Never fall
+  // back to older/alternate cookie names because that can authenticate a
+  // different browser session and cause cross-account identity confusion.
   const cookies = String(cookieHeader || '').split(';').map((item) => item.trim());
-  for (const name of COOKIE_NAMES) {
-    const part = cookies.find((item) => item.startsWith(`${name}=`));
-    if (!part) continue;
-    const token = decodeURIComponent(part.slice(name.length + 1));
-    try {
-      const payload = await decode({ token, secret: authSecret, salt: name });
-      const userId = payload?.sub || payload?.id;
-      if (userId) return { id: String(userId), email: payload.email, name: payload.name };
-    } catch { /* Try the next supported cookie name. */ }
-  }
+  const part = cookies.find((item) => item.startsWith(`${SESSION_COOKIE_NAME}=`));
+  if (!part) return null;
+
+  try {
+    const token = decodeURIComponent(part.slice(SESSION_COOKIE_NAME.length + 1));
+    const payload = await decode({ token, secret: authSecret, salt: SESSION_COOKIE_NAME });
+    const userId = payload?.sub;
+    if (typeof userId === 'string' && userId.trim()) return { id: userId, email: payload.email, name: payload.name };
+  } catch { /* Invalid, expired, or malformed session cookie. */ }
   return null;
 }
 
@@ -45,4 +53,4 @@ function requireInternal(req, _res, next) {
   next();
 }
 
-module.exports = { requireAuth, requireInternal, sessionUserFromCookie, getCookie };
+module.exports = { requireAuth, requireInternal, sessionUserFromCookie, getCookie, SESSION_COOKIE_NAME };

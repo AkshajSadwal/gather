@@ -68,6 +68,20 @@ async function updateAvatar(req, res) {
   return ok(res, { profile, image: media.url });
 }
 
+async function removeFollower(req, res) {
+  const username = normalizeUsername(req.params.username);
+  const follower = await prisma.user.findUnique({ where: { username }, select: { id: true, username: true } });
+  if (!follower) throw new HttpError(404, 'USER_NOT_FOUND', 'That account could not be found.');
+  if (follower.id === req.user.id) throw new HttpError(400, 'INVALID_FOLLOWER', 'You cannot remove yourself as a follower.');
+  const relation = await prisma.follow.findUnique({
+    where: { followerId_followedId: { followerId: follower.id, followedId: req.user.id } },
+    select: { id: true, accepted: true }
+  });
+  if (!relation || !relation.accepted) throw new HttpError(404, 'FOLLOWER_NOT_FOUND', 'That account is not an accepted follower.');
+  await prisma.follow.delete({ where: { id: relation.id } });
+  return ok(res, { removed: true, username: follower.username });
+}
+
 async function follow(req, res) {
   const target = await prisma.user.findUnique({ where: { username: normalizeUsername(req.params.username) }, select: { id: true, profile: { select: { visibility: true } } } });
   if (!target) throw new HttpError(404, 'USER_NOT_FOUND', 'That account could not be found.');
@@ -130,4 +144,4 @@ async function search(req, res) {
   return ok(res, { users, hashtags, posts });
 }
 
-module.exports = { profile, updateProfile, updateAvatar, follow, listRelation, followRequests, updateFollowRequest, search };
+module.exports = { profile, updateProfile, updateAvatar, follow, removeFollower, listRelation, followRequests, updateFollowRequest, search };

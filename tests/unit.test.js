@@ -8,7 +8,7 @@ const backendRequire = createRequire(path.resolve(__dirname, '../backend/package
 const { encode } = backendRequire('@auth/core/jwt');
 const { normalizeEmail, normalizeUsername, validUsername } = require('../backend/src/utils/normalize');
 const { identify } = require('../backend/src/services/storage');
-const { sessionUserFromCookie } = require('../backend/src/middleware/auth');
+const { sessionUserFromCookie, SESSION_COOKIE_NAME } = require('../backend/src/middleware/auth');
 const { MediasoupService } = require('../backend/src/services/mediasoupService');
 
 test('account identifiers normalize consistently and usernames are validated', () => {
@@ -28,14 +28,29 @@ test('media signature checks recognize supported formats and reject fake image b
   assert.equal(await identify(Buffer.from('plain text is not media')), null);
 });
 
-test('backend accepts only valid, unexpired Auth.js session cookies', async () => {
-  const name = 'authjs.session-token';
+test('backend accepts only the active Auth.js session cookie and its subject', async () => {
+  const name = SESSION_COOKIE_NAME;
   const token = await encode({ token: { sub: 'user-unit-1', email: 'unit@example.test' }, secret: process.env.AUTH_SECRET, salt: name, maxAge: 3600 });
   const valid = await sessionUserFromCookie(`${name}=${encodeURIComponent(token)}`);
   assert.equal(valid.id, 'user-unit-1');
   assert.equal(await sessionUserFromCookie(`${name}=not-a-token`), null);
+  assert.equal(await sessionUserFromCookie(`${name}=%E0%A4%A`), null);
+
   const expired = await encode({ token: { sub: 'user-unit-2' }, secret: process.env.AUTH_SECRET, salt: name, maxAge: -120 });
   assert.equal(await sessionUserFromCookie(`${name}=${encodeURIComponent(expired)}`), null);
+
+  // Legacy cookie names must never be accepted. This is the regression case
+  // for cross-account identity confusion caused by stale cookies.
+  const legacyName = name === 'authjs.session-token' ? 'next-auth.session-token' : 'authjs.session-token';
+  const legacyToken = await encode({ token: { sub: 'wrong-user' }, secret: process.env.AUTH_SECRET, salt: legacyName, maxAge: 3600 });
+  assert.equal(await sessionUserFromCookie(`${legacyName}=${encodeURIComponent(legacyToken)}`), null);
+
+  // Even if a stale legacy cookie and the current cookie are both present,
+  // the active cookie remains the only identity source.
+  const activeToken = await encode({ token: { sub: 'right-user' }, secret: process.env.AUTH_SECRET, salt: name, maxAge: 3600 });
+  const mixedCookies = `${legacyName}=${encodeURIComponent(legacyToken)}; ${name}=${encodeURIComponent(activeToken)}`;
+  const mixed = await sessionUserFromCookie(mixedCookies);
+  assert.equal(mixed.id, 'right-user');
 });
 
 test('mediasoup worker creates one room with deduplicated send and receive transports and closes cleanly', async () => {

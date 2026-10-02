@@ -112,6 +112,24 @@ test('auth, social persistence, upload validation, messages, and call lifecycle'
     assert.equal(follow.body.data.following, true);
     await request(app).post(`/api/follows/${accounts[1].username}/toggle`).set('Cookie', firstCookie).expect(200);
 
+    const followAgain = await request(app).post(`/api/follows/${accounts[1].username}/toggle`).set('Cookie', firstCookie).expect(200);
+    assert.equal(followAgain.body.data.following, true);
+    await request(app).delete(`/api/follows/followers/${accounts[0].username}`).set('Cookie', secondCookie).expect(200);
+    assert.equal(await prisma.follow.findUnique({ where: { followerId_followedId: { followerId: firstUser.id, followedId: secondUser.id } } }), null);
+
+    await request(app).patch('/api/users/me/profile').set('Cookie', secondCookie).send({ visibility: 'PRIVATE' }).expect(200);
+    const pendingFollow = await request(app).post(`/api/follows/${accounts[1].username}/toggle`).set('Cookie', firstCookie).expect(200);
+    assert.equal(pendingFollow.body.data.following, false);
+    assert.equal(pendingFollow.body.data.pending, true);
+    const pendingRequests = await request(app).get('/api/follows/requests').set('Cookie', secondCookie).expect(200);
+    const pendingRequest = pendingRequests.body.data.requests.find((item) => item.follower.id === firstUser.id);
+    assert.ok(pendingRequest);
+    assert.equal((await prisma.follow.findUnique({ where: { id: pendingRequest.id } })).accepted, false);
+    const acceptedRequest = await request(app).patch(`/api/follows/requests/${pendingRequest.id}`).set('Cookie', secondCookie).send({ accepted: true }).expect(200);
+    assert.equal(acceptedRequest.body.data.accepted, true);
+    assert.equal((await prisma.follow.findUnique({ where: { id: pendingRequest.id } })).accepted, true);
+    await request(app).patch('/api/users/me/profile').set('Cookie', secondCookie).send({ visibility: 'PUBLIC' }).expect(200);
+
     const story = await request(app).post('/api/stories').set('Cookie', firstCookie).attach('media', image, { filename: 'story.png', contentType: 'image/png' }).expect(201);
     mediaUrls.push(story.body.data.story.media[0].url);
     await request(app).post(`/api/stories/${story.body.data.story.id}/view`).set('Cookie', secondCookie).expect(200);
@@ -125,6 +143,21 @@ test('auth, social persistence, upload validation, messages, and call lifecycle'
     const conversation = (await request(app).post(`/api/messages/conversations/${accounts[1].username}`).set('Cookie', firstCookie).expect(200)).body.data.conversation;
     createdConversationIds.push(conversation.id);
     const outsiderResponse = await request(app).get(`/api/messages/conversations/${conversation.id}`).set('Cookie', outsiderCookie).expect(403);
+
+    await prisma.message.createMany({
+      data: [
+        { conversationId: conversation.id, senderId: firstUser.id, body: 'Unread one' },
+        { conversationId: conversation.id, senderId: firstUser.id, body: 'Unread two' }
+      ]
+    });
+    const unreadSummary = await request(app).get('/api/messages/unread').set('Cookie', secondCookie).expect(200);
+    assert.equal(unreadSummary.body.data.total, 2);
+    assert.equal(unreadSummary.body.data.unreadByConversation[conversation.id], 2);
+    const secondConversations = await request(app).get('/api/messages/conversations').set('Cookie', secondCookie).expect(200);
+    assert.equal(secondConversations.body.data.conversations.find((item) => item.id === conversation.id).unreadCount, 2);
+    await request(app).post(`/api/messages/conversations/${conversation.id}/read`).set('Cookie', secondCookie).expect(200);
+    const clearedUnread = await request(app).get('/api/messages/unread').set('Cookie', secondCookie).expect(200);
+    assert.equal(clearedUnread.body.data.total, 0);
     assert.equal(outsiderResponse.body.error.code, 'FORBIDDEN');
 
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -137,7 +170,9 @@ test('auth, social persistence, upload validation, messages, and call lifecycle'
     const incomingMessage = event(socketB, 'message:received');
     const ack = await new Promise((resolve) => socketA.emit('message:send', { conversationId: conversation.id, body: 'Socket persisted message' }, resolve));
     assert.equal(ack.data.body, 'Socket persisted message');
-    assert.equal((await incomingMessage).id, ack.data.id);
+    const incomingPayload = await incomingMessage;
+    assert.equal(incomingPayload.id, ack.data.id);
+    assert.equal(incomingPayload.unreadCount, 1);
     const unauthorizedMessage = await new Promise((resolve) => socketOutsider.emit('message:send', { conversationId: conversation.id, body: 'No access' }, resolve));
     assert.equal(unauthorizedMessage.error.code, 'FORBIDDEN');
     await request(app).post(`/api/messages/conversations/${conversation.id}/read`).set('Cookie', secondCookie).expect(200);

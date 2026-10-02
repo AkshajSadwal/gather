@@ -53,9 +53,18 @@ function createSocketServer(server, frontendUrl, database = prisma) {
         const recipients = await database.conversationParticipant.findMany({ where: { conversationId, userId: { not: userId } }, select: { userId: true } });
         const delivered = recipients.some((recipient) => onlineSockets.has(recipient.userId));
         if (delivered) await database.message.update({ where: { id: message.id }, data: { deliveredAt: new Date() } });
-        const output = { ...message, delivered: !!delivered };
+        const output = { ...message, delivered: !!delivered, unreadCount: 0 };
         socket.emit('message:received', output);
-        recipients.forEach(({ userId: recipientId }) => io.to(`user:${recipientId}`).emit('message:received', output));
+        for (const { userId: recipientId } of recipients) {
+          const unreadCount = await database.message.count({
+            where: {
+              conversationId,
+              senderId: { not: recipientId },
+              reads: { none: { userId: recipientId } }
+            }
+          });
+          io.to(`user:${recipientId}`).emit('message:received', { ...output, unreadCount });
+        }
         if (delivered) socket.emit('message:delivered', { conversationId, messageId: message.id });
         ack({ data: output });
       } catch { ack({ error: { code: 'MESSAGE_FAILED', message: 'Could not send this message.' } }); }

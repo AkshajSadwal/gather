@@ -31,6 +31,7 @@ router.get('/users/:username', maybeAuth, route(users.profile));
 router.patch('/users/me/profile', requireAuth, writeLimiter, route(users.updateProfile));
 router.post('/users/me/avatar', requireAuth, writeLimiter, upload.single('media'), route(users.updateAvatar));
 router.post('/follows/:username/toggle', requireAuth, writeLimiter, route(users.follow));
+router.delete('/follows/followers/:username', requireAuth, writeLimiter, route(users.removeFollower));
 router.get('/users/:username/followers', maybeAuth, route(users.listRelation));
 router.get('/users/:username/following', maybeAuth, route(users.listRelation));
 router.get('/follows/requests', requireAuth, route(users.followRequests));
@@ -51,6 +52,7 @@ router.get('/notifications', requireAuth, route(notifications.list));
 router.post('/notifications/:id/read', requireAuth, route(notifications.markRead));
 
 router.get('/messages/conversations', requireAuth, route(messages.conversations));
+router.get('/messages/unread', requireAuth, route(messages.unread));
 router.post('/messages/conversations/:username', requireAuth, writeLimiter, route(messages.openConversation));
 router.get('/messages/conversations/:id', requireAuth, route(messages.messages));
 router.post('/messages/conversations/:id/read', requireAuth, route(messages.markRead));

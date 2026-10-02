@@ -6,13 +6,14 @@ import { ArrowLeft, ArrowUp, MessageCircle, MoreHorizontal, Search } from 'lucid
 import { useSession } from 'next-auth/react';
 import { api } from '../lib/api';
 import Avatar from './Avatar';
-import { useRealtime } from '../lib/realtime';
+import { useRealtime, useUnreadMessages } from '../lib/realtime';
 import { useToast } from './Providers';
 import CallOverlay from './MediasoupCallOverlay';
 
 export default function MessagesView({ initialTo = '' }) {
   const { data: session } = useSession();
   const socket = useRealtime();
+  const { unreadByConversation, markConversationRead } = useUnreadMessages();
   const [conversations, setConversations] = useState([]);
   const [activeId, setActiveId] = useState('');
   const [messages, setMessages] = useState([]);
@@ -41,9 +42,14 @@ export default function MessagesView({ initialTo = '' }) {
     if (!activeId) { setMessages([]); return; }
     let cancelled = false;
     api(`/messages/conversations/${activeId}`).then((data) => { if (!cancelled) setMessages(data.messages || []); }).catch((error) => notify(error.message, 'error'));
-    api(`/messages/conversations/${activeId}/read`, { method: 'POST' }).catch(() => {});
+    api(`/messages/conversations/${activeId}/read`, { method: 'POST' }).then(() => {
+      if (!cancelled) {
+        markConversationRead(activeId);
+        setConversations((all) => all.map((conversation) => conversation.id === activeId ? { ...conversation, unreadCount: 0 } : conversation));
+      }
+    }).catch(() => {});
     return () => { cancelled = true; };
-  }, [activeId]);
+  }, [activeId, markConversationRead]);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, typing]);
 
   useEffect(() => {
@@ -53,7 +59,11 @@ export default function MessagesView({ initialTo = '' }) {
     const onMessage = (message) => {
       if (message.conversationId !== activeId) { loadConversations(); return; }
       setMessages((all) => all.some((item) => item.id === message.id) ? all : [...all, message]);
-      if (message.senderId !== session?.user?.id) api(`/messages/conversations/${activeId}/read`, { method: 'POST' }).catch(() => {});
+      if (message.senderId !== session?.user?.id) {
+        markConversationRead(activeId);
+        api(`/messages/conversations/${activeId}/read`, { method: 'POST' }).catch(() => {});
+        setConversations((all) => all.map((conversation) => conversation.id === activeId ? { ...conversation, unreadCount: 0 } : conversation));
+      }
       loadConversations();
     };
     const onRead = ({ conversationId, userId, readAt }) => { if (conversationId === activeId) setMessages((all) => all.map((message) => message.senderId === session?.user?.id ? { ...message, reads: [...(message.reads || []), { userId, readAt }] } : message)); };
@@ -80,7 +90,8 @@ export default function MessagesView({ initialTo = '' }) {
     <aside className={`${activeId ? 'hidden md:flex' : 'flex'} min-h-0 flex-col border-r border-line`}><div className="border-b border-line p-4"><h2 className="text-lg font-semibold">Your messages</h2><form onSubmit={startConversation} className="mt-3 flex items-center gap-2 rounded-xl bg-paper px-3 py-2.5"><Search size={16} className="text-ink/40" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Start with a username" className="min-w-0 flex-1 bg-transparent text-xs outline-none" /></form></div><div className="min-h-0 flex-1 overflow-auto p-2">{loading ? <div className="space-y-2 p-2">{[0, 1, 2].map((n) => <div key={n} className="skeleton h-16 rounded-xl" />)}</div> : conversations.map((conversation) => {
       const person = conversation.participants?.find((item) => item.userId !== session?.user?.id)?.user;
       const last = conversation.messages?.[0];
-      return <button key={conversation.id} onClick={() => setActiveId(conversation.id)} className={`flex w-full items-center gap-3 rounded-xl p-3 text-left transition ${activeId === conversation.id ? 'bg-mint/60' : 'hover:bg-paper'}`}><span className="relative"><Avatar src={person?.image} name={person?.username} size="sm" />{online[person?.id] && <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-[#49b879]" />}</span><span className="min-w-0 flex-1"><b className="block truncate text-sm">{person?.username || 'Conversation'}</b><span className="block truncate text-xs text-ink/50">{last ? `${last.senderId === session?.user?.id ? 'You: ' : ''}${last.body}` : 'Say hello'}</span></span></button>;
+      const unreadCount = unreadByConversation[conversation.id] ?? conversation.unreadCount ?? 0;
+      return <button key={conversation.id} onClick={() => setActiveId(conversation.id)} className={`flex w-full items-center gap-3 rounded-xl p-3 text-left transition ${activeId === conversation.id ? 'bg-mint/60' : 'hover:bg-paper'}`}><span className="relative"><Avatar src={person?.image} name={person?.username} size="sm" />{online[person?.id] && <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-[#49b879]" />}</span><span className="min-w-0 flex-1"><b className="block truncate text-sm">{person?.username || 'Conversation'}</b><span className={`block truncate text-xs ${unreadCount ? 'font-semibold text-ink' : 'text-ink/50'}`}>{last ? `${last.senderId === session?.user?.id ? 'You: ' : ''}${last.body}` : 'Say hello'}</span></span>{unreadCount > 0 && <span aria-label={`${unreadCount} unread messages from ${person?.username || 'this user'}`} className="grid min-w-5 h-5 place-items-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold leading-none text-white">{unreadCount > 99 ? '99+' : unreadCount}</span>}</button>;
     })}{!loading && !conversations.length && <div className="p-6 text-center"><MessageCircle className="mx-auto text-moss/50" /><p className="mt-3 text-sm font-medium">No conversations yet</p><p className="mt-1 text-xs leading-5 text-ink/50">Search for a username above to send a private message.</p></div>}</div><p className="border-t border-line px-4 py-3 text-[11px] text-ink/35">Messages stay between conversation participants.</p></aside>
     <div className={`${activeId ? 'flex' : 'hidden md:flex'} min-h-0 flex-col`}>
       {active ? <><header className="flex items-center gap-3 border-b border-line px-4 py-3"><button onClick={() => setActiveId('')} aria-label="Back to messages" className="rounded-full p-2 hover:bg-paper md:hidden"><ArrowLeft size={19} /></button><Link href={`/profile/${other?.username}`}><Avatar src={other?.image} name={other?.username} size="sm" /></Link><div className="min-w-0 flex-1"><Link href={`/profile/${other?.username}`} className="text-sm font-semibold">@{other?.username}</Link><p className="text-xs text-ink/45">{online[other?.id] ? 'Active now' : socket?.connected ? 'Away' : 'Reconnecting…'}</p></div><div id="call-controls" className="ml-auto flex items-center gap-1" /><button aria-label="Conversation options" className="rounded-full p-2 text-ink/45"><MoreHorizontal size={19} /></button></header>

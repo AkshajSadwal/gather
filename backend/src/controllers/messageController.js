@@ -1,6 +1,20 @@
 const prisma = require('../config/prisma');
 const { HttpError, ok } = require('../utils/http');
 
+async function unreadCountsForUser(userId, conversationIds) {
+  if (!conversationIds.length) return {};
+  const rows = await prisma.message.groupBy({
+    by: ['conversationId'],
+    where: {
+      conversationId: { in: conversationIds },
+      senderId: { not: userId },
+      reads: { none: { userId } }
+    },
+    _count: { _all: true }
+  });
+  return Object.fromEntries(rows.map((row) => [row.conversationId, row._count._all]));
+}
+
 async function conversations(req, res) {
   const links = await prisma.conversationParticipant.findMany({
     where: { userId: req.user.id }, orderBy: { conversation: { updatedAt: 'desc' } },
@@ -13,7 +27,17 @@ async function conversations(req, res) {
       }
     }
   });
-  return ok(res, { conversations: links.map(({ conversation }) => conversation) });
+  const conversationIds = links.map(({ conversation }) => conversation.id);
+  const unreadByConversation = await unreadCountsForUser(req.user.id, conversationIds);
+  const data = links.map(({ conversation }) => ({ ...conversation, unreadCount: unreadByConversation[conversation.id] || 0 }));
+  return ok(res, { conversations: data });
+}
+
+async function unread(req, res) {
+  const memberships = await prisma.conversationParticipant.findMany({ where: { userId: req.user.id }, select: { conversationId: true } });
+  const unreadByConversation = await unreadCountsForUser(req.user.id, memberships.map(({ conversationId }) => conversationId));
+  const total = Object.values(unreadByConversation).reduce((sum, count) => sum + count, 0);
+  return ok(res, { total, unreadByConversation });
 }
 
 async function suggestions(req, res) {
@@ -55,4 +79,5 @@ async function markRead(req, res) {
   return ok(res, { read: unread.length });
 }
 
-module.exports = { conversations, suggestions, openConversation, messages, markRead };
+module.exports = { conversations, unread, suggestions, openConversation, messages, markRead };
+
