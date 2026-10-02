@@ -1,9 +1,12 @@
 const path = require('node:path');
 const prisma = require('../config/prisma');
 const { sessionUserFromCookie } = require('./auth');
+const { isBlockedBetween } = require('../services/blocks');
 
 async function canViewAuthor(authorId, visibility, userId) {
-  if (visibility !== 'PRIVATE' || authorId === userId) return true;
+  if (authorId === userId) return true;
+  if (userId && await isBlockedBetween(userId, authorId)) return false;
+  if (visibility !== 'PRIVATE') return true;
   if (!userId) return false;
   const follow = await prisma.follow.findUnique({ where: { followerId_followedId: { followerId: userId, followedId: authorId } }, select: { accepted: true } });
   return Boolean(follow?.accepted);

@@ -1,13 +1,15 @@
 const prisma = require('../config/prisma');
 const { HttpError, ok } = require('../utils/http');
 const { persistUpload, removeLocal } = require('../services/storage');
+const { getBlockedUserIds } = require('../services/blocks');
 
 async function list(req, res) {
   const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 30);
+  const blockedIds = await getBlockedUserIds(req.user?.id);
   const relationships = req.user?.id ? await prisma.follow.findMany({ where: { followerId: req.user.id }, select: { followedId: true, accepted: true } }) : [];
   const relationshipByAuthor = new Map(relationships.map((relation) => [relation.followedId, relation]));
-  const visibleAuthorIds = [...(req.user?.id ? [req.user.id] : []), ...relationships.filter((item) => item.accepted).map((item) => item.followedId)];
-  const visibilityFilters = [{ author: { is: { profile: { is: { visibility: 'PUBLIC' } } } } }];
+  const visibleAuthorIds = [...(req.user?.id ? [req.user.id] : []), ...relationships.filter((item) => item.accepted).map((item) => item.followedId)].filter((id) => !blockedIds.includes(id));
+  const visibilityFilters = [{ authorId: { notIn: blockedIds }, author: { is: { profile: { is: { visibility: 'PUBLIC' } } } } }];
   if (visibleAuthorIds.length) visibilityFilters.push({ authorId: { in: visibleAuthorIds } });
   const reels = await prisma.reel.findMany({ where: { OR: visibilityFilters }, orderBy: { createdAt: 'desc' }, take: limit + 1, ...(req.query.cursor ? { cursor: { id: String(req.query.cursor) }, skip: 1 } : {}), include: { author: { select: { id: true, username: true, image: true, profile: { select: { displayName: true } } } }, media: true, post: { include: { _count: { select: { likes: true, comments: true } }, likes: { where: { userId: req.user?.id || '__visitor__' }, select: { id: true }, take: 1 }, bookmarks: { where: { userId: req.user?.id || '__visitor__' }, select: { id: true }, take: 1 } } } } });
   const hasMore = reels.length > limit;

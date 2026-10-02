@@ -64,7 +64,20 @@ model User {
   reels               Reel[]
   callsInitiated      CallSession[] @relation("callInitiator")
   callsReceived       CallSession[] @relation("callRecipient")
+  blocksCreated      Block[] @relation("blocker")
+  blocksReceived     Block[] @relation("blocked")
+}
 
+
+model Block {
+  id        String   @id @default(cuid())
+  blockerId String
+  blockedId String
+  blocker   User     @relation("blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked   User     @relation("blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  @@unique([blockerId, blockedId])
+  @@index([blockedId, createdAt])
 }
 
 model Profile {

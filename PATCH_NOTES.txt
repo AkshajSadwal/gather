@@ -1,0 +1,19 @@
+Gather hardening/update pass — 2026-10-03
+
+Reviewed the uploaded project code and documentation.
+
+Included changes:
+- Added server-side Block/Unblock feature with PostgreSQL schema + migration.
+- Blocking removes existing follow relationships in both directions.
+- Block boundary enforced across follow, post, story, reel, media, messaging, calling, discovery, and notifications.
+- Added GET /api/notifications/unread and a live Updates unread badge in the frontend.
+- Added rate limiting for username/email availability checks.
+- Profile PATCH no longer accepts avatarUrl; avatar changes stay on the authenticated avatar endpoint.
+- Auth / me counts only accepted followers/following.
+- Google account-sync username creation now retries username conflicts with cryptographically random suffixes.
+- Updated README, ARCHITECTURE, DEVELOPMENT, STATUS, TODO, API, and added SECURITY.md.
+- Added integration coverage for block behavior and notification unread totals.
+
+Validation:
+- Backend JavaScript syntax checks passed for modified backend files.
+- Full npm install / database / mediasoup / browser suite was not rerun in this packaging environment, so run the project's normal npm validation commands after replacing the files.

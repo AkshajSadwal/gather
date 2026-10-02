@@ -3,6 +3,7 @@ const { z } = require('zod');
 const prisma = require('../config/prisma');
 const { normalizeUsername, normalizeEmail, validUsername } = require('../utils/normalize');
 const { HttpError, ok } = require('../utils/http');
+const crypto = require('node:crypto');
 
 const signupSchema = z.object({
   username: z.string().trim().min(3).max(30),
@@ -68,14 +69,19 @@ async function syncGoogle(req, res) {
   let user = await prisma.user.findUnique({ where: { email }, select: { id: true, username: true } });
   if (!user) {
     const base = normalizeUsername(email.split('@')[0]).replace(/[^a-z0-9._]/g, '').slice(0, 24) || 'member';
-    let username = base;
-    while (await prisma.user.findUnique({ where: { username }, select: { id: true } })) {
-      username = `${base.slice(0, 23)}${Math.random().toString(36).slice(2, 8)}`;
+    for (let attempt = 0; attempt < 5 && !user; attempt += 1) {
+      const suffix = attempt === 0 ? '' : `.${crypto.randomBytes(4).toString('hex')}`;
+      const username = `${base.slice(0, 30 - suffix.length)}${suffix}`;
+      try {
+        user = await prisma.user.create({
+          data: { email, username, image, profile: { create: { displayName: name || username, avatarUrl: image } } },
+          select: { id: true, username: true }
+        });
+      } catch (error) {
+        if (error.code !== 'P2002' || error.meta?.target?.includes('email')) throw error;
+      }
     }
-    user = await prisma.user.create({
-      data: { email, username, image, profile: { create: { displayName: name || username, avatarUrl: image } } },
-      select: { id: true, username: true }
-    });
+    if (!user) throw new HttpError(409, 'ACCOUNT_SYNC_CONFLICT', 'Could not create a unique username. Please try Google sign-in again.');
   } else if (image) {
     await prisma.user.update({ where: { id: user.id }, data: { image, profile: { upsert: { create: { displayName: name || user.username, avatarUrl: image }, update: { avatarUrl: image } } } } });
   }
@@ -85,7 +91,7 @@ async function syncGoogle(req, res) {
 async function me(req, res) {
   const user = await prisma.user.findUnique({
     where: { id: req.user.id },
-    select: { id: true, username: true, email: true, image: true, createdAt: true, profile: true, _count: { select: { followers: true, following: true, posts: true } } }
+    select: { id: true, username: true, email: true, image: true, createdAt: true, profile: true, _count: { select: { followers: { where: { accepted: true } }, following: { where: { accepted: true } }, posts: true } } }
   });
   if (!user) throw new HttpError(401, 'SESSION_EXPIRED', 'Your account is no longer available. Please sign in again.');
   return ok(res, { user });

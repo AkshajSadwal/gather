@@ -2,33 +2,66 @@
 
 ## First run
 
-1. Copy `.env.example` to `.env`; generate independent `AUTH_SECRET` and `INTERNAL_AUTH_SECRET` values.
-2. Start PostgreSQL with `docker compose up -d postgres`.
-3. Install with `npm install`, apply the checked-in initial migration with `npm run db:migrate`, and load demo fixtures with `npm run db:seed`.
-4. In separate terminals run `npm run dev:backend` and `npm run dev:frontend`.
+1. Copy `.env.example` to `.env`.
+2. Generate independent `AUTH_SECRET` and `INTERNAL_AUTH_SECRET` values.
+3. Start PostgreSQL with `docker compose up -d postgres`.
+4. Run `npm install`.
+5. Run `npm run db:generate` and `npm run db:migrate`.
+6. Run `npm run db:seed` for fictional demo fixtures.
+7. Start `npm run dev:backend` and `npm run dev:frontend` in separate terminals.
 
-The backend loads the root `.env` from `backend/src/config/env.js`. Prisma reads the same root file because `prisma/schema.prisma` is in the workspace root. Avoid using `127.0.0.1` for one service and `localhost` for another; the Auth.js session cookie is host-only.
+## Database changes
 
-## Changes
+Edit `prisma/schema.prisma`, then create a named migration with Prisma:
 
-- Schema updates: edit `prisma/schema.prisma`, then create a named migration with Prisma. Do not edit generated Prisma client files.
-- API work: keep route wiring in `backend/src/routes`, request behavior in controllers, shared logic in services, and access checks in middleware/controller guards.
-- UI work: use App Router pages and reusable components in `frontend/components`. The API helper always includes credentials and translates the shared error envelope.
-- Uploads: use multipart `media` fields. Images are limited to 12 MB each; video uploads are limited to 120 MB each. Posts can include up to 10 items.
-- OAuth: configure the Google callback URL in the README and restart Next.js after changing credentials.
-- Calls: local same-machine testing uses `MEDIASOUP_LISTEN_IP=127.0.0.1`. For LAN or production access, listen on a routable interface, set `MEDIASOUP_ANNOUNCED_ADDRESS`, and open the configured UDP/TCP RTC range. Do not hard-code a public IP in application code.
+```powershell
+npm run db:migrate -- --name describe_change
+```
 
-## Validation
+Do not edit generated Prisma client files by hand.
+
+Current schema includes identity, social graph, content/media, notifications, conversations/messages/read receipts, stories, reels, calls, and blocks.
+
+## Code organization
+
+- `backend/src/routes` — route wiring and middleware order
+- `backend/src/controllers` — request behavior/business operations
+- `backend/src/services` — shared domains such as storage, notifications, blocks, and mediasoup
+- `backend/src/middleware` — authentication, uploads, media access
+- `backend/src/sockets` — authenticated realtime events
+- `frontend/app` — Next.js route segments
+- `frontend/components` — reusable UI
+- `frontend/lib` — browser API/realtime helpers
+
+## Validation checklist
 
 ```powershell
 npm run lint --workspace=@instagram-clone/backend
-npm test
+npm run lint --workspace=@instagram-clone/frontend
 npm run lint
+npm test
 npm run build
 npm run db:status
 Invoke-RestMethod http://localhost:4000/health
 ```
 
-The backend test suite uses a real PostgreSQL database configured by `DATABASE_URL`; it creates uniquely named test users and removes them after the run. Keep the test database separate from data you care about.
+For E2E:
 
-The mediasoup unit test starts a real worker and verifies router creation, duplicate room/transport guards, RTP capabilities, and cleanup. The PostgreSQL integration test exercises call authorization, lifecycle transitions, resource ownership, reconnect, and disconnect cleanup. Browser device capture still requires camera/microphone access and reachable RTC ports.
+```powershell
+npm run test:e2e
+```
+
+The E2E suite expects a live frontend/backend and a disposable PostgreSQL database. Browser call tests also require camera/microphone permissions and a mediasoup RTC port range that the browser can reach.
+
+## Privacy testing
+
+At minimum, test two separate accounts and verify:
+
+- profile editing always uses `/users/me/profile` and `req.user.id`
+- pending follow requests appear only for the target user
+- a blocked relationship prevents follow/message/call/content access
+- a blocked user's media URL cannot be fetched through `/uploads/*`
+
+## Deployment notes
+
+Use HTTPS, strong unique secrets, managed PostgreSQL, object storage/CDN, media scanning/transcoding, and an externally reachable mediasoup host with the configured RTC range. Add TURN when your network topology requires it.

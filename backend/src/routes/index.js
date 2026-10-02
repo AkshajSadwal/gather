@@ -13,6 +13,7 @@ const notifications = require('../controllers/notificationController');
 
 const router = express.Router();
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: 'draft-8', legacyHeaders: false });
+const availabilityLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: 'draft-8', legacyHeaders: false });
 const writeLimiter = rateLimit({ windowMs: 60 * 1000, limit: 50, standardHeaders: 'draft-8', legacyHeaders: false });
 const route = (handler) => asyncHandler(handler);
 const maybeAuth = async (req, _res, next) => {
@@ -24,14 +25,15 @@ router.get('/auth/me', requireAuth, route(auth.me));
 router.post('/auth/signup', authLimiter, route(auth.signup));
 router.post('/auth/login', authLimiter, route(auth.login));
 router.post('/auth/google-sync', requireInternal, route(auth.syncGoogle));
-router.get('/users/check-username', route(auth.checkUsername));
-router.get('/users/check-email', route(auth.checkEmail));
+router.get('/users/check-username', availabilityLimiter, route(auth.checkUsername));
+router.get('/users/check-email', availabilityLimiter, route(auth.checkEmail));
 router.get('/users/suggestions', maybeAuth, route(messages.suggestions));
 router.get('/users/:username', maybeAuth, route(users.profile));
 router.patch('/users/me/profile', requireAuth, writeLimiter, route(users.updateProfile));
 router.post('/users/me/avatar', requireAuth, writeLimiter, upload.single('media'), route(users.updateAvatar));
 router.post('/follows/:username/toggle', requireAuth, writeLimiter, route(users.follow));
 router.delete('/follows/followers/:username', requireAuth, writeLimiter, route(users.removeFollower));
+router.post('/blocks/:username/toggle', requireAuth, writeLimiter, route(users.toggleBlock));
 router.get('/users/:username/followers', maybeAuth, route(users.listRelation));
 router.get('/users/:username/following', maybeAuth, route(users.listRelation));
 router.get('/follows/requests', requireAuth, route(users.followRequests));
@@ -49,6 +51,7 @@ router.get('/posts/:id/comments', maybeAuth, route(posts.listComments));
 router.post('/posts/:id/comments', requireAuth, writeLimiter, route(posts.createComment));
 router.delete('/comments/:commentId', requireAuth, route(posts.deleteComment));
 router.get('/notifications', requireAuth, route(notifications.list));
+router.get('/notifications/unread', requireAuth, route(notifications.unread));
 router.post('/notifications/:id/read', requireAuth, route(notifications.markRead));
 
 router.get('/messages/conversations', requireAuth, route(messages.conversations));

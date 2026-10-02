@@ -1,11 +1,13 @@
 const prisma = require('../config/prisma');
 const { HttpError, ok } = require('../utils/http');
 const { persistUpload, removeLocal } = require('../services/storage');
+const { isBlockedBetween, getBlockedUserIds } = require('../services/blocks');
 
 async function list(req, res) {
   const now = new Date();
+  const blockedIds = await getBlockedUserIds(req.user.id);
   const following = await prisma.follow.findMany({ where: { followerId: req.user.id, accepted: true }, select: { followedId: true } });
-  const users = [...following.map((item) => item.followedId), req.user.id];
+  const users = [...following.map((item) => item.followedId), req.user.id].filter((id) => !blockedIds.includes(id));
   const stories = await prisma.story.findMany({ where: { authorId: { in: users }, expiresAt: { gt: now } }, orderBy: { createdAt: 'asc' }, include: { author: { select: { id: true, username: true, image: true, profile: { select: { avatarUrl: true } } } }, media: true, views: { where: { viewerId: req.user.id }, select: { id: true } }, _count: { select: { views: true } } } });
   const groups = new Map();
   for (const story of stories) {
@@ -29,6 +31,7 @@ async function view(req, res) {
   const story = await prisma.story.findUnique({ where: { id: req.params.id }, select: { id: true, authorId: true, expiresAt: true } });
   if (!story || story.expiresAt <= new Date()) throw new HttpError(404, 'STORY_NOT_FOUND', 'That story has expired or was removed.');
   if (story.authorId === req.user.id) return ok(res, { viewed: true });
+  if (await isBlockedBetween(req.user.id, story.authorId)) throw new HttpError(403, 'BLOCKED', 'You cannot view this story.');
   const follows = await prisma.follow.findUnique({ where: { followerId_followedId: { followerId: req.user.id, followedId: story.authorId } }, select: { accepted: true } });
   const profile = await prisma.profile.findUnique({ where: { userId: story.authorId }, select: { visibility: true } });
   if (profile?.visibility === 'PRIVATE' && !follows?.accepted) throw new HttpError(403, 'FORBIDDEN', 'Follow this account to view its stories.');

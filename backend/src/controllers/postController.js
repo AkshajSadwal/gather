@@ -3,6 +3,7 @@ const prisma = require('../config/prisma');
 const { HttpError, ok } = require('../utils/http');
 const { persistUpload, removeLocal } = require('../services/storage');
 const { createNotification } = require('../services/notifications');
+const { getBlockState, isBlockedBetween, getBlockedUserIds } = require('../services/blocks');
 
 const postInclude = (userId) => ({
   author: { select: { id: true, username: true, image: true, profile: { select: { displayName: true, avatarUrl: true } } } },
@@ -14,24 +15,49 @@ const postInclude = (userId) => ({
 });
 
 function shapePost(post) {
-  return { ...post, isLiked: post.likes?.length > 0, isBookmarked: post.bookmarks?.length > 0, likes: undefined, bookmarks: undefined };
+  return {
+    ...post,
+    isLiked: post.likes?.length > 0,
+    isBookmarked: post.bookmarks?.length > 0,
+    likes: undefined,
+    bookmarks: undefined
+  };
 }
 
 async function assertPostVisible(post, userId) {
+  if (userId && await isBlockedBetween(userId, post.authorId)) {
+    throw new HttpError(403, 'BLOCKED', 'You cannot access this post.');
+  }
   const profile = await prisma.profile.findUnique({ where: { userId: post.authorId }, select: { visibility: true } });
   if (profile?.visibility === 'PRIVATE' && post.authorId !== userId) {
-    const follow = userId ? await prisma.follow.findUnique({ where: { followerId_followedId: { followerId: userId, followedId: post.authorId } }, select: { accepted: true } }) : null;
+    const follow = userId
+      ? await prisma.follow.findUnique({
+        where: { followerId_followedId: { followerId: userId, followedId: post.authorId } },
+        select: { accepted: true }
+      })
+      : null;
     if (!follow?.accepted) throw new HttpError(403, 'PRIVATE_ACCOUNT', 'Follow this account to view its posts.');
   }
 }
 
 async function feed(req, res) {
   const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 30);
-  const following = await prisma.follow.findMany({ where: { followerId: req.user.id, accepted: true }, select: { followedId: true } });
+  const blockedIds = await getBlockedUserIds(req.user.id);
+  const following = await prisma.follow.findMany({
+    where: {
+      followerId: req.user.id,
+      accepted: true,
+      followedId: { notIn: blockedIds }
+    },
+    select: { followedId: true }
+  });
   const authorIds = [...following.map((row) => row.followedId), req.user.id];
   const posts = await prisma.post.findMany({
-    where: { authorId: { in: authorIds } }, orderBy: { createdAt: 'desc' }, take: limit + 1,
-    ...(req.query.cursor ? { cursor: { id: String(req.query.cursor) }, skip: 1 } : {}), include: postInclude(req.user.id)
+    where: { authorId: { in: authorIds, notIn: blockedIds } },
+    orderBy: { createdAt: 'desc' },
+    take: limit + 1,
+    ...(req.query.cursor ? { cursor: { id: String(req.query.cursor) }, skip: 1 } : {}),
+    include: postInclude(req.user.id)
   });
   const hasMore = posts.length > limit;
   if (hasMore) posts.pop();
@@ -40,7 +66,17 @@ async function feed(req, res) {
 
 async function explore(req, res) {
   const limit = Math.min(Math.max(Number(req.query.limit) || 12, 1), 30);
-  const posts = await prisma.post.findMany({ where: { author: { is: { profile: { is: { visibility: 'PUBLIC' } } } } }, orderBy: { createdAt: 'desc' }, take: limit + 1, ...(req.query.cursor ? { cursor: { id: String(req.query.cursor) }, skip: 1 } : {}), include: postInclude(req.user?.id || '__visitor__') });
+  const blockedIds = await getBlockedUserIds(req.user?.id);
+  const posts = await prisma.post.findMany({
+    where: {
+      authorId: { notIn: blockedIds },
+      author: { is: { profile: { is: { visibility: 'PUBLIC' } } } }
+    },
+    orderBy: { createdAt: 'desc' },
+    take: limit + 1,
+    ...(req.query.cursor ? { cursor: { id: String(req.query.cursor) }, skip: 1 } : {}),
+    include: postInclude(req.user?.id || '__visitor__')
+  });
   const hasMore = posts.length > limit;
   if (hasMore) posts.pop();
   return ok(res, { posts: posts.map(shapePost), nextCursor: hasMore ? posts.at(-1)?.id : null });
@@ -57,10 +93,12 @@ async function create(req, res) {
     const tags = [...new Set((body.caption.match(/#[\p{L}\p{N}_]+/gu) || []).map((tag) => tag.slice(1).toLowerCase()).filter(Boolean))].slice(0, 30);
     post = await prisma.post.create({
       data: {
-        authorId: req.user.id, caption: body.caption,
+        authorId: req.user.id,
+        caption: body.caption,
         media: { create: persisted.map((item, position) => ({ ...item, position })) },
         hashtags: { create: tags.map((tag) => ({ hashtag: { connectOrCreate: { where: { tag }, create: { tag } } } })) }
-      }, include: postInclude(req.user.id)
+      },
+      include: postInclude(req.user.id)
     });
   } catch (error) {
     await Promise.all(persisted.map((media) => removeLocal(media.url).catch(() => {})));
@@ -68,7 +106,11 @@ async function create(req, res) {
   }
   const mentions = [...new Set((body.caption.match(/@([a-zA-Z0-9._]{3,30})/g) || []).map((part) => part.slice(1).toLowerCase()))];
   if (mentions.length) {
-    const mentioned = await prisma.user.findMany({ where: { username: { in: mentions }, id: { not: req.user.id } }, select: { id: true } });
+    const blockedIds = await getBlockedUserIds(req.user.id);
+    const mentioned = await prisma.user.findMany({
+      where: { username: { in: mentions }, id: { not: req.user.id, notIn: blockedIds } },
+      select: { id: true }
+    });
     await Promise.all(mentioned.map((user) => createNotification({ recipientId: user.id, actorId: req.user.id, type: 'MENTION', entityId: post.id })));
   }
   return ok(res, { post: shapePost(post) }, 201);
@@ -101,7 +143,7 @@ async function toggleLike(req, res) {
     return ok(res, { liked: false });
   }
   await prisma.like.create({ data: { userId: req.user.id, postId: post.id } });
-  await createNotification({ recipientId: post.authorId, actorId: req.user.id, type: 'LIKE', entityId: post.id });
+  if (post.authorId !== req.user.id) await createNotification({ recipientId: post.authorId, actorId: req.user.id, type: 'LIKE', entityId: post.id });
   return ok(res, { liked: true });
 }
 
@@ -134,7 +176,7 @@ async function createComment(req, res) {
   if (!post) throw new HttpError(404, 'POST_NOT_FOUND', 'That post could not be found.');
   await assertPostVisible(post, req.user.id);
   const comment = await prisma.comment.create({ data: { postId: post.id, userId: req.user.id, body: parsed.data.body }, include: { user: { select: { id: true, username: true, image: true } } } });
-  await createNotification({ recipientId: post.authorId, actorId: req.user.id, type: 'COMMENT', entityId: post.id });
+  if (post.authorId !== req.user.id) await createNotification({ recipientId: post.authorId, actorId: req.user.id, type: 'COMMENT', entityId: post.id });
   return ok(res, { comment }, 201);
 }
 

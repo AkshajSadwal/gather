@@ -1,12 +1,12 @@
 # Gather
 
-Gather is an original, responsive social app built with a Next.js App Router frontend and a separate Express, Socket.IO, and Prisma backend. It includes credential and Google authentication, profiles and follows, posts and comments, search, stories, reels, notifications, direct messages, and one-to-one voice/video calls routed through a mediasoup SFU.
+Gather is an original responsive social app with a JavaScript Next.js App Router frontend and a separate Express + Socket.IO backend. PostgreSQL and Prisma provide the persistent relational data layer. It includes credentials and Google authentication, profiles, public/private accounts, follows and follow requests, posts/carousels, likes/comments/bookmarks, search/hashtags, notifications, direct messages, stories, reels, and one-to-one voice/video calls routed through a mediasoup SFU.
 
 ## Requirements
 
 - Node.js 20 or newer
 - npm 10 or newer
-- Docker Desktop with Compose, or a compatible local PostgreSQL 16 instance
+- Docker Desktop with Compose, or a compatible PostgreSQL 16 instance
 
 ## Local setup (PowerShell)
 
@@ -14,63 +14,62 @@ Run these commands from `A:\in\instagram-clone`.
 
 ```powershell
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
-```
-
-Edit `.env`. Generate two independent secrets (do not reuse either one):
-
-```powershell
-node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"
-```
-
-Put one generated value in `AUTH_SECRET` and another in `INTERNAL_AUTH_SECRET`. The example PostgreSQL URL targets the local container below. Keep `.env` private; it is ignored by Git.
-
-Install packages and start the local PostgreSQL service:
-
-```powershell
 npm install
 docker compose up -d postgres
-```
-
-Create the schema and realistic demo data:
-
-```powershell
+npm run db:generate
 npm run db:migrate
 npm run db:seed
 ```
 
-Start the Express backend in one terminal and the Next.js frontend in another:
+Start the backend and frontend in separate terminals:
 
 ```powershell
 npm run dev:backend
 npm run dev:frontend
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Use `localhost` for both services rather than switching one URL to `127.0.0.1`; the Auth.js HttpOnly cookie must be sent to the API on the same host.
+Open `http://localhost:3000`. Use `localhost` consistently for local development so the host-only Auth.js session cookie is available to the frontend/API topology used by this app.
 
-The seed creates `maya`, `noah`, `amara`, `leo`, and `sofia` with the shared local-only password `GatherDemo2026!`. These `example.test` accounts are fictional development fixtures. Do not deploy the seed password to a public environment.
+The seed creates fictional demo accounts `maya`, `noah`, `amara`, `leo`, and `sofia`, all using the local-only password `GatherDemo2026!`. Never deploy seed credentials to a public environment.
+
+## Data architecture
+
+- PostgreSQL stores users, profiles, follows/follow requests, blocks, posts/media metadata, likes, comments, bookmarks, hashtags, notifications, conversations/messages/read receipts, stories/views, reels, and call metadata.
+- Actual image/video bytes live in the upload storage layer. Local development writes to `uploads/`; production should use object storage plus a CDN.
+- Prisma is the ORM/typed query layer between the JavaScript backend and PostgreSQL.
+- Username and email are normalized before writes and protected by database-level unique constraints for race-safe uniqueness.
+
+## Authentication
+
+Auth.js owns the browser session. Credentials login is checked by Express with bcrypt; Google sign-in uses a server-only account-sync request protected by `INTERNAL_AUTH_SECRET`. Express and Socket.IO validate the exact Auth.js cookie using the server-only `AUTH_SECRET`. No bearer token or signing key is exposed to browser JavaScript.
+
+Generate independent secrets with:
+
+```powershell
+node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"
+```
+
+Put different values in `AUTH_SECRET` and `INTERNAL_AUTH_SECRET`.
+
+## Privacy and safety
+
+Gather supports public/private accounts and a user-to-user block system. Blocking is enforced server-side and removes existing follow relationships in both directions. Blocked users cannot follow, message, call, or retrieve private content across the blocked boundary. The UI exposes Block/Unblock on another user's profile.
+
+This is an application-level privacy system, not a substitute for deployment-level access controls, moderation, abuse handling, or legal/privacy policy.
 
 ## Voice and video calls
 
-The backend starts a configurable mediasoup worker pool and creates one router for each active call. Socket.IO carries authenticated call state and mediasoup negotiation messages; audio/video RTP stays on mediasoup WebRTC transports. Local development defaults to `MEDIASOUP_LISTEN_IP=127.0.0.1`, which is suitable when the browser and backend run on the same machine.
+Socket.IO carries authenticated call control and mediasoup negotiation messages. Audio/video RTP stays on mediasoup WebRTC transports; it never passes through Socket.IO or PostgreSQL.
 
-For a server reachable from other devices, set `MEDIASOUP_LISTEN_IP=0.0.0.0`, set `MEDIASOUP_ANNOUNCED_ADDRESS` to the server's reachable address, and allow both UDP and TCP traffic through `MEDIASOUP_RTC_MIN_PORT`–`MEDIASOUP_RTC_MAX_PORT` in the host firewall and network security rules. Do not place a public address in source control. `MEDIASOUP_ENABLE_TCP=true` provides a fallback for clients whose networks block UDP. A failed call is closed after the configured ring timeout or reconnect grace period.
+Local development defaults to `MEDIASOUP_LISTEN_IP=127.0.0.1`. For remote devices or deployment, configure an appropriate listen interface, `MEDIASOUP_ANNOUNCED_ADDRESS`, and open the configured UDP/TCP RTC range. The current app is intentionally single-backend-instance; multi-instance deployment requires shared call/presence coordination and a Socket.IO adapter.
 
-The local `.env.example` documents the complete SFU settings. See the mediasoup lifecycle, recovery, event contract, and single-instance scaling limitation in [ARCHITECTURE.md](ARCHITECTURE.md) and [docs/API.md](docs/API.md).
-
-## Google OAuth
-
-Username/password registration works without external credentials. To enable Google login, set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, set `NEXT_PUBLIC_GOOGLE_LOGIN=true`, and register this redirect URI in the Google OAuth client:
-
-```text
-http://localhost:3000/api/auth/callback/google
-```
-
-Restart the frontend after changing environment values. The OAuth secret and `INTERNAL_AUTH_SECRET` are server-only variables.
+The current SFU setup has no TURN credentials. Some restrictive NAT/firewall configurations may still need a TURN service.
 
 ## Useful commands
 
 ```powershell
 npm run db:generate
+npm run db:migrate
 npm run db:migrate -- --name describe_change
 npm run db:seed
 npm test
@@ -78,19 +77,16 @@ npm run lint --workspace=@instagram-clone/backend
 npm run lint --workspace=@instagram-clone/frontend
 npm run lint
 npm run build
+npm run test:e2e
 ```
 
-`GET http://localhost:4000/health` reports API and database status. The upload service writes validated files below `uploads/`; the directory is ignored except for its placeholder. The current limits are 12 MB per image and 120 MB per video.
+`GET http://localhost:4000/health` reports API and PostgreSQL health. Current development upload limits are 12 MB per image and 120 MB per video.
 
-## Authentication and deployment notes
-
-Auth.js owns login, session creation, expiry, and logout. It stores a 14-day encrypted JWT in an HttpOnly, SameSite=Lax cookie. The Express API decrypts and validates that exact Auth.js cookie using the server-only `AUTH_SECRET`; it does not mint a bearer token for browser JavaScript. Credential login is checked by Express with bcrypt, while Google sign-in calls a backend account-sync endpoint protected by `INTERNAL_AUTH_SECRET`. See [ARCHITECTURE.md](ARCHITECTURE.md).
-
-For deployment, use HTTPS, strong unique secrets, a managed PostgreSQL database, a persistent or object-backed upload store, and an externally reachable mediasoup host with its configured RTC port range open. Configure frontend/backend origins consistently. The bundled development Compose file is not a production database deployment.
-
-## Project notes
+## Documentation
 
 - [Development workflow](DEVELOPMENT.md)
-- [API and socket contract](docs/API.md)
-- [Current implementation status](STATUS.md)
-- [Known follow-up work](TODO.md)
+- [Architecture](ARCHITECTURE.md)
+- [API and Socket.IO contract](docs/API.md)
+- [Current status](STATUS.md)
+- [Follow-up work](TODO.md)
+- [Security notes](SECURITY.md)

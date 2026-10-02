@@ -130,6 +130,17 @@ test('auth, social persistence, upload validation, messages, and call lifecycle'
     assert.equal((await prisma.follow.findUnique({ where: { id: pendingRequest.id } })).accepted, true);
     await request(app).patch('/api/users/me/profile').set('Cookie', secondCookie).send({ visibility: 'PUBLIC' }).expect(200);
 
+    const unreadNotifications = await request(app).get('/api/notifications/unread').set('Cookie', secondCookie).expect(200);
+    assert.equal(typeof unreadNotifications.body.data.total, 'number');
+
+    // Block is reciprocal for interactions: it removes existing follow links and blocks
+    // future follow/message/call operations without deleting the target account.
+    const blockResponse = await request(app).post(`/api/blocks/${accounts[1].username}/toggle`).set('Cookie', firstCookie).expect(200);
+    assert.equal(blockResponse.body.data.blocked, true);
+    await request(app).post(`/api/follows/${accounts[1].username}/toggle`).set('Cookie', firstCookie).expect(403);
+    await request(app).post(`/api/messages/conversations/${accounts[1].username}`).set('Cookie', firstCookie).expect(403);
+    await request(app).post(`/api/blocks/${accounts[1].username}/toggle`).set('Cookie', firstCookie).expect(200);
+
     const story = await request(app).post('/api/stories').set('Cookie', firstCookie).attach('media', image, { filename: 'story.png', contentType: 'image/png' }).expect(201);
     mediaUrls.push(story.body.data.story.media[0].url);
     await request(app).post(`/api/stories/${story.body.data.story.id}/view`).set('Cookie', secondCookie).expect(200);

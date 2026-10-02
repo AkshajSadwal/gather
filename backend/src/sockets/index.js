@@ -4,6 +4,7 @@ const prisma = require('../config/prisma');
 const { mediasoup } = require('../config/env');
 const { CallService } = require('../services/callService');
 const { registerCallHandlers } = require('./calls');
+const { isBlockedBetween } = require('../services/blocks');
 
 const activeCalls = new Map();
 const onlineSockets = new Map();
@@ -48,6 +49,8 @@ function createSocketServer(server, frontendUrl, database = prisma) {
         if (!conversationId || !body || body.length > 4000) return ack({ error: { code: 'INVALID_MESSAGE', message: 'Message must contain 1–4000 characters.' } });
         const member = await database.conversationParticipant.findUnique({ where: { conversationId_userId: { conversationId, userId } }, select: { id: true } });
         if (!member) return ack({ error: { code: 'FORBIDDEN', message: 'You are not a participant in this conversation.' } });
+        const other = await database.conversationParticipant.findFirst({ where: { conversationId, userId: { not: userId } }, select: { userId: true } });
+        if (other && await isBlockedBetween(userId, other.userId)) return ack({ error: { code: 'BLOCKED', message: 'You cannot message this account.' } });
         const message = await database.message.create({ data: { conversationId, senderId: userId, body }, include: { sender: { select: { id: true, username: true, image: true } } } });
         await database.conversation.update({ where: { id: conversationId }, data: { updatedAt: new Date() } });
         const recipients = await database.conversationParticipant.findMany({ where: { conversationId, userId: { not: userId } }, select: { userId: true } });
