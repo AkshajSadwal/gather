@@ -19,9 +19,33 @@ async function identify(buffer) {
   return null;
 }
 
+async function readHeader(filePath, length = 64 * 1024) {
+  const handle = await fs.open(filePath, 'r');
+  try {
+    const buffer = Buffer.allocUnsafe(length);
+    const { bytesRead } = await handle.read(buffer, 0, length, 0);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
+}
+
+async function cleanupTempUploads(maxAgeMs = 24 * 60 * 60 * 1000) {
+  await fs.mkdir(path.join(uploadDir, '.tmp'), { recursive: true });
+  const now = Date.now();
+  const entries = await fs.readdir(path.join(uploadDir, '.tmp'), { withFileTypes: true });
+  await Promise.all(entries.filter((entry) => entry.isFile()).map(async (entry) => {
+    const filePath = path.join(uploadDir, '.tmp', entry.name);
+    try {
+      const stat = await fs.stat(filePath);
+      if (now - stat.mtimeMs > maxAgeMs) await fs.rm(filePath, { force: true });
+    } catch { /* A concurrent upload may have already removed the file. */ }
+  }));
+}
+
 async function persistUpload(file, prefix = 'misc') {
   if (!allowedPrefixes.has(prefix)) prefix = 'misc';
-  const actualType = await identify(await fs.readFile(file.path));
+  const actualType = await identify(await readHeader(file.path));
   if (!actualType || actualType !== file.mimetype || (!imageTypes.has(actualType) && !videoTypes.has(actualType))) {
     await fs.rm(file.path, { force: true });
     throw new HttpError(400, 'INVALID_MEDIA', 'The uploaded file is not a supported image or video.');
@@ -74,4 +98,4 @@ async function getSignedUrl(reference) {
   }
 }
 
-module.exports = { persistUpload, removeLocal, getSignedUrl, identify, imageTypes, videoTypes };
+module.exports = { persistUpload, removeLocal, getSignedUrl, identify, imageTypes, videoTypes, cleanupTempUploads };

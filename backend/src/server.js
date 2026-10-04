@@ -3,11 +3,12 @@ const app = require('./app');
 const prisma = require('./config/prisma');
 const { port, frontendUrl } = require('./config/env');
 const { ensureBucket } = require('./services/minio');
+const { cleanupTempUploads } = require('./services/storage');
 const { createSocketServer } = require('./sockets');
 
 const server = http.createServer(app);
 const io = createSocketServer(server, frontendUrl);
-Promise.all([io.callService.ready, ensureBucket()]).then(() => server.listen(port, () => console.log(`Gather backend listening on http://localhost:${port}`))).catch((error) => {
+Promise.all([io.callService.ready, ensureBucket(), cleanupTempUploads()]).then(() => server.listen(port, () => console.log(`Gather backend listening on http://localhost:${port}`))).catch((error) => {
   console.error('[startup] mediasoup or MinIO initialization failed; backend will not accept traffic.', error);
   process.exitCode = 1;
   io.callService.close().finally(() => prisma.$disconnect());

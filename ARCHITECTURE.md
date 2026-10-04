@@ -91,3 +91,7 @@ New browser media URLs go through `GET /api/media?key=...`; the backend authenti
 ## Scaling boundary
 
 The current design intentionally supports one backend instance. Presence, busy-call state, and mediasoup rooms are in memory. A multi-instance deployment needs a shared Socket.IO adapter and distributed coordination for presence/call ownership. Mediasoup workers remain attached to their owning backend process.
+
+## Kubernetes packaging
+
+The repository includes container images and a Kubernetes baseline. The backend remains a single replica because mediasoup rooms, active calls, presence, and busy-user state are process-local. The backend uses `hostNetwork` for direct mediasoup RTC port binding; `MEDIASOUP_ANNOUNCED_ADDRESS` must be browser-reachable. PostgreSQL and MinIO are represented as single-replica StatefulSets with persistent volumes for local/small deployments; serious production should prefer managed HA database/object storage.

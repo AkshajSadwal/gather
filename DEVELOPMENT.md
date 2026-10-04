@@ -72,3 +72,7 @@ Use HTTPS, strong unique secrets, managed PostgreSQL, private object storage/CDN
 ## Media storage
 
 Start MinIO with PostgreSQL using `docker compose up -d postgres minio`. The S3 API is at `http://localhost:9000` and the MinIO Console is at `http://localhost:9001`. New uploads are private MinIO objects; media is authorized by the backend and delivered with short-lived presigned URLs. See `STORAGE.md` for the full storage lifecycle.
+
+## Kubernetes
+
+For Kubernetes packaging, build `Dockerfile.backend` and `Dockerfile.frontend`, create the required `gather-app-secrets` and `gather-minio-license` secrets, then apply `kubectl apply -k k8s`. The backend exposes `/health/live` and `/health/ready` for Kubernetes probes. Keep backend replicas at one until distributed Socket.IO/call coordination is implemented. See `KUBERNETES.md`.

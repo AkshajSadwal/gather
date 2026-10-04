@@ -42,3 +42,11 @@ The source changes were reviewed for consistency and JavaScript/JSX syntax shoul
 - Legacy local media migration to MinIO, object-storage lifecycle cleanup, and production-grade media processing/CDN remain follow-up work.
 - Reports have no admin review UI or endpoints yet (review via the database), no reporter notifications, and no automated action on reported content.
 - Comments, stories, reels and direct messages cannot be reported individually yet; report the account or the post instead.
+
+## Latest infrastructure pass (2026-10-04)
+
+- Added Kubernetes liveness/readiness endpoints (`/health/live`, `/health/ready`) and deployment probes.
+- Added container build files for the backend and Next.js frontend; frontend now uses Next.js standalone output for container packaging.
+- Added Kubernetes baseline manifests for PostgreSQL, MinIO AIStor, the single backend replica, frontend, and a separate migration Job.
+- Hardened uploads so media-type detection reads only a bounded header buffer instead of loading an entire video/image into memory.
+- Added startup cleanup for stale Multer temporary uploads and immutable-object cache metadata for new MinIO objects.

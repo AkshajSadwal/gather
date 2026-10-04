@@ -91,3 +91,7 @@ npm run test:e2e
 - [Follow-up work](TODO.md)
 - [Security notes](SECURITY.md)
 - [Media storage](STORAGE.md)
+
+## Kubernetes
+
+A single-backend Kubernetes baseline is available in `k8s/` with container build files at the repository root (`Dockerfile.backend` and `Dockerfile.frontend`). See `KUBERNETES.md` and `k8s/README.md` for image builds, secrets, mediasoup networking, MinIO public media URLs, migrations, and the current single-replica limitation.

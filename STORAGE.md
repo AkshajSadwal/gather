@@ -68,3 +68,9 @@ MINIO_PRESIGN_EXPIRES_SECONDS=300
 ```
 
 For production, keep the bucket private and replace the local MinIO endpoint with private/internal and publicly reachable object/CDN endpoints as appropriate. Never expose the access or secret key to browser JavaScript.
+
+## Operational hardening
+
+Uploads are validated from a small file header buffer rather than loading the entire media file into memory just to detect its type. Temporary Multer files older than 24 hours are removed during backend startup so interrupted/crashed uploads do not accumulate indefinitely.
+
+New immutable object keys are uploaded with long-lived `Cache-Control` metadata so an object-storage/CDN layer can cache media efficiently without requiring cache invalidation for later edits.

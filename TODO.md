@@ -18,3 +18,10 @@
 - Add message delivery reliability when a browser is offline for an extended period.
 - Add stronger feed/reel ranking and media preloading when real traffic requires it.
 - Add broader Playwright coverage for desktop/mobile and real device media behavior.
+
+## Kubernetes / operations
+
+- Put frontend/backend behind HTTPS ingress and configure production domains/CORS/cookies.
+- Replace the single-node PostgreSQL/MinIO StatefulSets with managed/HA infrastructure for serious production.
+- Add observability (metrics, tracing, centralized logs) and backup/restore automation.
+- Add distributed Socket.IO/call coordination before increasing backend replicas.

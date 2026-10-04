@@ -1,41 +1,12 @@
-Gather MinIO media-storage implementation
-
-This patch moves NEW uploaded images/videos from local persistent storage into a private MinIO bucket running in Docker.
+Operational/Kubernetes pass for Gather (2026-10-04)
 
 Changed:
-- docker-compose.yml: added MinIO service + persistent minio_data volume.
-- .env.example: added MINIO_* configuration.
-- backend/src/config/env.js: added MinIO storage config.
-- backend/src/services/minio.js: built-in S3 Signature V4 client using Node crypto/fetch; bucket initialization; streaming object upload; delete; presigned GET URLs.
-- backend/src/services/storage.js: uploads validated temp files into MinIO and returns s3:// references; legacy /uploads cleanup remains supported.
-- backend/src/controllers/mediaController.js: authorization-gated media endpoint redirects to short-lived presigned URLs.
-- backend/src/middleware/mediaAccess.js: shared authorization logic for media access; legacy /uploads remains supported.
-- backend/src/routes/index.js: added GET /api/media.
-- backend/src/server.js: waits for MinIO bucket initialization before accepting traffic.
-- backend/src/app.js: health endpoint now includes MinIO status.
-- post/reel/story/profile controllers: store new objects under posts/, reels/, stories/, avatars/.
-- frontend/lib/api.js: s3:// media references resolve through the authorized /api/media endpoint.
-- documentation: README.md, ARCHITECTURE.md, DEVELOPMENT.md, SECURITY.md, STATUS.md, docs/API.md, STORAGE.md.
-
-Compatibility:
-- Existing /uploads/... database references continue to work during migration.
-- No Prisma schema change is required.
-- Existing local media is NOT automatically migrated by this patch.
-
-Startup:
-  docker compose up -d postgres minio
-  npm install
-  npm run db:generate
-  npm run db:migrate
-  npm run storage:check
-  npm run dev:backend
-  npm run dev:frontend
-
-MinIO console:
-  http://localhost:9001
-
-S3 API:
-  http://localhost:9000
-
-Default local bucket:
-  gather-media
+- Added /health/live and /health/ready endpoints.
+- Added startup cleanup of stale Multer temporary files.
+- Media MIME/signature detection now reads only a bounded header, not the entire media file.
+- New immutable MinIO objects get long-lived Cache-Control metadata.
+- Added Dockerfiles for backend/frontend and .dockerignore.
+- Frontend uses Next.js standalone output for container packaging.
+- Added single-backend Kubernetes baseline, PostgreSQL/MinIO StatefulSets, Services, probes, and migration Job.
+- Added Kubernetes documentation and deployment notes.
+- App Docker containers run as non-root users.

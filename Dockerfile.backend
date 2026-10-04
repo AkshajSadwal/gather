@@ -1,0 +1,18 @@
+FROM node:24-bookworm-slim AS base
+WORKDIR /app
+ENV NODE_ENV=production
+
+COPY package.json package-lock.json ./
+COPY backend/package.json ./backend/package.json
+COPY frontend/package.json ./frontend/package.json
+COPY prisma/schema.prisma ./prisma/schema.prisma
+RUN npm ci
+RUN npx prisma generate
+
+COPY backend ./backend
+COPY prisma ./prisma
+RUN mkdir -p /app/uploads && chown -R node:node /app
+USER node
+
+EXPOSE 4000 40000-49999/udp 40000-49999/tcp
+CMD ["node", "backend/src/server.js"]
