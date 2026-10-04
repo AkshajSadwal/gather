@@ -168,6 +168,7 @@ model PostMedia {
   postId    String
   post      Post @relation(fields: [postId], references: [id], onDelete: Cascade)
   url       String
+  objectKey String?
   type      MediaType
   mimeType  String
   sizeBytes Int
@@ -306,6 +307,7 @@ model StoryMedia {
   storyId   String
   story     Story @relation(fields: [storyId], references: [id], onDelete: Cascade)
   url       String
+  objectKey String?
   type      MediaType
   mimeType  String
   sizeBytes Int
@@ -343,6 +345,7 @@ model ReelMedia {
   reelId    String
   reel      Reel @relation(fields: [reelId], references: [id], onDelete: Cascade)
   url       String
+  objectKey String?
   mimeType  String
   sizeBytes Int
   createdAt DateTime @default(now())

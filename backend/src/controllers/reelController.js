@@ -30,7 +30,7 @@ async function create(req, res) {
   try {
     reel = await prisma.$transaction(async (tx) => {
       const post = await tx.post.create({ data: { authorId: req.user.id, caption, media: { create: { ...media, position: 0 } } } });
-      return tx.reel.create({ data: { authorId: req.user.id, postId: post.id, caption, media: { create: { url: media.url, mimeType: media.mimeType, sizeBytes: media.sizeBytes } } }, include: { media: true } });
+      return tx.reel.create({ data: { authorId: req.user.id, postId: post.id, caption, media: { create: { url: media.url, objectKey: media.objectKey, mimeType: media.mimeType, sizeBytes: media.sizeBytes } } }, include: { media: true } });
     });
   } catch (error) { await removeLocal(media.url).catch(() => {}); throw error; }
   const response = { ...reel };

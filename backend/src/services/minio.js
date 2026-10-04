@@ -136,10 +136,15 @@ async function ensureBucket() {
 async function putFile(filePath, objectKey, contentType) {
   assertConfigured();
   validateObjectKey(objectKey);
+  const stats = await fs.promises.stat(filePath);
+  if (!stats.isFile()) throw new Error('Upload source is not a regular file.');
   const payloadHash = await sha256File(filePath);
   const body = fs.createReadStream(filePath);
   const response = await s3Request('PUT', storage.bucket, objectKey, {
-    headers: { 'Content-Type': contentType },
+    headers: {
+      'Content-Type': contentType,
+      'Content-Length': String(stats.size)
+    },
     body,
     payloadHash
   });
