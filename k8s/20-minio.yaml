@@ -31,28 +31,47 @@ spec:
       labels:
         app: minio
     spec:
+      securityContext:
+        runAsUser: 1001
+        runAsGroup: 1001
+        runAsNonRoot: true
+        fsGroup: 1001
+
       containers:
         - name: minio
-          image: quay.io/minio/aistor/minio:RELEASE.2026-09-19T17-05-25Z
-          args:
-            - server
-            - /data
-            - --console-address
-            - ":9001"
+          image: bitnamilegacy/minio:2025.7.23-debian-12-r5
+          imagePullPolicy: IfNotPresent
+
           env:
             - name: MINIO_ROOT_USER
               valueFrom:
                 secretKeyRef:
                   name: gather-app-secrets
                   key: MINIO_ROOT_USER
+
             - name: MINIO_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: gather-app-secrets
                   key: MINIO_ROOT_PASSWORD
+
+            - name: MINIO_DEFAULT_BUCKETS
+              value: "gather-media"
+
+            - name: MINIO_BROWSER
+              value: "on"
+
           ports:
-            - containerPort: 9000
-            - containerPort: 9001
+            - name: api
+              containerPort: 9000
+
+            - name: console
+              containerPort: 9001
+
+          volumeMounts:
+            - name: minio-data
+              mountPath: /bitnami/minio/data
+
           readinessProbe:
             httpGet:
               path: /minio/health/ready
@@ -61,6 +80,7 @@ spec:
             periodSeconds: 5
             timeoutSeconds: 3
             failureThreshold: 12
+
           livenessProbe:
             httpGet:
               path: /minio/health/live
@@ -69,11 +89,13 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 6
+
   volumeClaimTemplates:
     - metadata:
         name: minio-data
       spec:
-        accessModes: ["ReadWriteOnce"]
+        accessModes:
+          - ReadWriteOnce
         resources:
           requests:
             storage: 20Gi
