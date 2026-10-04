@@ -16,5 +16,19 @@ services:
       timeout: 3s
       retries: 20
 
+  minio:
+    image: quay.io/minio/aistor/minio:RELEASE.2026-09-19T17-05-25Z
+    command: server /data --console-address ":9001" --license /minio.license
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+      - ./minio.license:/minio.license:ro
+
 volumes:
   postgres_data:
+  minio_data:

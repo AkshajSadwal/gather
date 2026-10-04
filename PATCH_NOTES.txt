@@ -1,36 +1,41 @@
-Gather update pass — 2026-10-03 (second pass)
+Gather MinIO media-storage implementation
 
-Builds on the previous hardening/block-system pass.
+This patch moves NEW uploaded images/videos from local persistent storage into a private MinIO bucket running in Docker.
 
-New:
-- Blocked accounts management: GET /api/blocks + a "Blocked accounts" section in Settings with Unblock.
-- User/post reporting: new Report model + migration (20261003120000_user_and_post_reports),
-  POST /api/reports (rate-limited, validated, deduplicated while open, visibility-checked for posts),
-  shared ReportDialog component, Report button on profiles, "Report post" in the post menu.
-- Tests: integration coverage for the blocked list and report flow; unit test for the report payload schema.
-- Docs: API.md, STATUS.md, TODO.md, SECURITY.md, ARCHITECTURE.md, README.md, DEVELOPMENT.md updated.
+Changed:
+- docker-compose.yml: added MinIO service + persistent minio_data volume.
+- .env.example: added MINIO_* configuration.
+- backend/src/config/env.js: added MinIO storage config.
+- backend/src/services/minio.js: built-in S3 Signature V4 client using Node crypto/fetch; bucket initialization; streaming object upload; delete; presigned GET URLs.
+- backend/src/services/storage.js: uploads validated temp files into MinIO and returns s3:// references; legacy /uploads cleanup remains supported.
+- backend/src/controllers/mediaController.js: authorization-gated media endpoint redirects to short-lived presigned URLs.
+- backend/src/middleware/mediaAccess.js: shared authorization logic for media access; legacy /uploads remains supported.
+- backend/src/routes/index.js: added GET /api/media.
+- backend/src/server.js: waits for MinIO bucket initialization before accepting traffic.
+- backend/src/app.js: health endpoint now includes MinIO status.
+- post/reel/story/profile controllers: store new objects under posts/, reels/, stories/, avatars/.
+- frontend/lib/api.js: s3:// media references resolve through the authorized /api/media endpoint.
+- documentation: README.md, ARCHITECTURE.md, DEVELOPMENT.md, SECURITY.md, STATUS.md, docs/API.md, STORAGE.md.
 
-Files changed/added:
-  prisma/schema.prisma                          (Report model, ReportReason/ReportStatus enums, relations)
-  prisma/migrations/20261003120000_user_and_post_reports/migration.sql   (NEW)
-  backend/src/controllers/reportController.js   (NEW)
-  backend/src/utils/reportSchema.js             (NEW)
-  backend/src/controllers/userController.js     (listBlocks)
-  backend/src/controllers/postController.js     (exports assertPostVisible)
-  backend/src/routes/index.js                   (GET /blocks, POST /reports, report rate limiter)
-  frontend/components/ReportDialog.jsx          (NEW)
-  frontend/components/SettingsView.jsx          (Blocked accounts section)
-  frontend/components/ProfileView.jsx           (Report button)
-  frontend/components/PostCard.jsx              (Report post menu item)
-  tests/backend.integration.test.js, tests/unit.test.js
+Compatibility:
+- Existing /uploads/... database references continue to work during migration.
+- No Prisma schema change is required.
+- Existing local media is NOT automatically migrated by this patch.
 
-After replacing files, run (from the project root):
+Startup:
+  docker compose up -d postgres minio
+  npm install
   npm run db:generate
-  npm run db:migrate        # applies the new migration
-  npm test
-  npm run lint
-  npm run build
+  npm run db:migrate
+  npm run storage:check
+  npm run dev:backend
+  npm run dev:frontend
 
-Validation performed in the packaging environment: backend JS syntax checks, JSX syntax checks for all
-frontend components, and a controller smoke test against an in-memory fake database. The PostgreSQL
-integration tests, Next.js build, and Playwright suite were NOT run here (no dependencies/network).
+MinIO console:
+  http://localhost:9001
+
+S3 API:
+  http://localhost:9000
+
+Default local bucket:
+  gather-media

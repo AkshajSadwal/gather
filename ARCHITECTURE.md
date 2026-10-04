@@ -70,7 +70,9 @@ The call service serializes lifecycle transitions. Accepted calls have a bounded
 
 ## Media storage
 
-Multer first writes a random temporary upload. `services/storage.js` checks file signatures against the declared MIME type, enforces per-kind byte limits, then atomically renames the accepted file into `uploads/`. PostgreSQL stores only media metadata and URLs. `/uploads/*` is authorization-gated by post/story/reel/profile ownership and visibility.
+Multer first writes a random temporary upload under `uploads/.tmp`. `services/storage.js` checks file signatures against the declared MIME type, enforces per-kind byte limits, then uploads the accepted file into a private MinIO/S3-compatible bucket. PostgreSQL stores only media metadata plus an `s3://bucket/object-key` reference.
+
+New browser media URLs go through `GET /api/media?key=...`; the backend authenticates/authorizes access using the post/story/reel/profile owner and privacy/block rules, then returns a short-lived presigned object-storage URL. The browser therefore downloads media directly from MinIO rather than making Express proxy the video/image bytes. Legacy `/uploads/*` remains only for older files created before the MinIO migration.
 
 ## Security layers
 

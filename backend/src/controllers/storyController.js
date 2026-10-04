@@ -20,7 +20,7 @@ async function list(req, res) {
 async function create(req, res) {
   if (!req.file) throw new HttpError(400, 'MEDIA_REQUIRED', 'Choose an image or video for your story.');
   const caption = String(req.body.caption || '').trim().slice(0, 500);
-  const media = await persistUpload(req.file);
+  const media = await persistUpload(req.file, 'stories');
   let story;
   try { story = await prisma.story.create({ data: { authorId: req.user.id, caption, expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), media: { create: media } }, include: { media: true } }); }
   catch (error) { await removeLocal(media.url).catch(() => {}); throw error; }

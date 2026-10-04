@@ -38,3 +38,8 @@ Authentication, username/email availability checks, and write operations have ro
 ## Current limits
 
 The app still needs deployment-level hardening such as HTTPS, a managed database, object-storage permissions, malware scanning, media processing, TURN configuration, shared realtime state for scale-out, and operational moderation/reporting.
+
+
+## Media storage
+
+MinIO/S3 objects are private. New media is exposed only after server-side ownership/privacy/block checks and through short-lived presigned URLs. Access keys remain server-side and are never sent to browser code.

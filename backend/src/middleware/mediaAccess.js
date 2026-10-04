@@ -12,38 +12,35 @@ async function canViewAuthor(authorId, visibility, userId) {
   return Boolean(follow?.accepted);
 }
 
+async function authorizeMediaReference(reference, userId) {
+  const [posts, stories, reels, avatar] = await Promise.all([
+    prisma.postMedia.findMany({ where: { url: reference }, select: { post: { select: { authorId: true, author: { select: { profile: { select: { visibility: true } } } } } } } }),
+    prisma.storyMedia.findMany({ where: { url: reference }, select: { story: { select: { authorId: true, expiresAt: true, author: { select: { profile: { select: { visibility: true } } } } } } } }),
+    prisma.reelMedia.findMany({ where: { url: reference }, select: { reel: { select: { authorId: true, author: { select: { profile: { select: { visibility: true } } } } } } } }),
+    prisma.user.findFirst({ where: { OR: [{ image: reference }, { profile: { is: { avatarUrl: reference } } }] }, select: { id: true } })
+  ]);
+  const checks = [
+    ...posts.map((entry) => canViewAuthor(entry.post.authorId, entry.post.author.profile?.visibility, userId)),
+    ...stories.map((entry) => entry.story.expiresAt > new Date() && canViewAuthor(entry.story.authorId, entry.story.author.profile?.visibility, userId)),
+    ...reels.map((entry) => canViewAuthor(entry.reel.authorId, entry.reel.author.profile?.visibility, userId)),
+    ...(avatar ? [true] : [])
+  ];
+  if (!checks.length) return { exists: false, allowed: false };
+  return { exists: true, allowed: (await Promise.all(checks)).some(Boolean) };
+}
+
 async function mediaAccess(req, res, next) {
   try {
     const filename = path.basename(req.path.slice(1));
     if (!filename || filename !== req.path.slice(1)) return res.status(404).json({ error: { code: 'MEDIA_NOT_FOUND', message: 'That media could not be found.' } });
     const url = `/uploads/${filename}`;
     const user = await sessionUserFromCookie(req.headers.cookie);
-    const userId = user?.id;
-    const [posts, stories, reels, avatar] = await Promise.all([
-      prisma.postMedia.findMany({
-        where: { url },
-        select: { post: { select: { authorId: true, author: { select: { profile: { select: { visibility: true } } } } } } }
-      }),
-      prisma.storyMedia.findMany({
-        where: { url },
-        select: { story: { select: { authorId: true, expiresAt: true, author: { select: { profile: { select: { visibility: true } } } } } } }
-      }),
-      prisma.reelMedia.findMany({
-        where: { url },
-        select: { reel: { select: { authorId: true, author: { select: { profile: { select: { visibility: true } } } } } } }
-      }),
-      prisma.user.findFirst({ where: { OR: [{ image: url }, { profile: { is: { avatarUrl: url } } }] }, select: { id: true } })
-    ]);
-    const permissions = await Promise.all([
-      ...posts.map((entry) => canViewAuthor(entry.post.authorId, entry.post.author.profile?.visibility, userId)),
-      ...stories.map((entry) => entry.story.expiresAt > new Date() && canViewAuthor(entry.story.authorId, entry.story.author.profile?.visibility, userId)),
-      ...reels.map((entry) => canViewAuthor(entry.reel.authorId, entry.reel.author.profile?.visibility, userId)),
-      ...(avatar ? [true] : [])
-    ]);
-    if (!permissions.length) return res.status(404).json({ error: { code: 'MEDIA_NOT_FOUND', message: 'That media could not be found.' } });
-    if (!permissions.some(Boolean)) return res.status(403).json({ error: { code: 'MEDIA_PRIVATE', message: 'You do not have access to this media.' } });
+    const result = await authorizeMediaReference(url, user?.id);
+    if (!result.exists) return res.status(404).json({ error: { code: 'MEDIA_NOT_FOUND', message: 'That media could not be found.' } });
+    if (!result.allowed) return res.status(403).json({ error: { code: 'MEDIA_PRIVATE', message: 'You do not have access to this media.' } });
     next();
   } catch (error) { next(error); }
 }
 
 module.exports = mediaAccess;
+module.exports.authorizeMediaReference = authorizeMediaReference;

@@ -11,6 +11,7 @@ const stories = require('../controllers/storyController');
 const reels = require('../controllers/reelController');
 const notifications = require('../controllers/notificationController');
 const reports = require('../controllers/reportController');
+const media = require('../controllers/mediaController');
 
 const router = express.Router();
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: 'draft-8', legacyHeaders: false });
@@ -43,6 +44,7 @@ router.get('/follows/requests', requireAuth, route(users.followRequests));
 router.patch('/follows/requests/:id', requireAuth, route(users.updateFollowRequest));
 router.get('/search', route(users.search));
 router.post('/reports', requireAuth, reportLimiter, route(reports.create));
+router.get('/media', route(media.serve));
 
 router.get('/posts/feed', requireAuth, route(posts.feed));
 router.get('/posts/explore', maybeAuth, route(posts.explore));

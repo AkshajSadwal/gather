@@ -16,7 +16,10 @@ export async function api(path, options = {}) {
 }
 
 export function mediaUrl(url) {
-  return url?.startsWith('http') ? url : `${API_URL}${url || ''}`;
+  if (!url) return '';
+  if (url.startsWith('http')) return url;
+  if (url.startsWith('s3://')) return `${API_URL}/api/media?key=${encodeURIComponent(url)}`;
+  return `${API_URL}${url}`;
 }
 
 export function initials(value = '?') {

@@ -17,3 +17,4 @@ prisma/dev.db
 /tests/e2e/.e2e-image-fixture.png
 /test-results/
 /playwright-report/
+minio.license

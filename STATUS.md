@@ -8,7 +8,7 @@ Last reviewed: 2026-10-03
 - PostgreSQL + Prisma relational data model with checked-in migrations.
 - Auth.js credentials and Google providers with server-side session validation.
 - Profiles, public/private accounts, follow requests, follower removal, following/unfollowing, posts/carousels, likes/comments/bookmarks, search/hashtags, notifications, messages/read receipts, stories, reels, and one-to-one mediasoup SFU calling.
-- Local media storage behind a storage service with MIME/signature/size checks and authorization-gated `/uploads`.
+- Private MinIO/S3-compatible media storage behind a storage service with MIME/signature/size checks. New uploads use `s3://` object references and short-lived presigned URLs; legacy `/uploads` serving remains for older local media during migration.
 - Server-side block system that removes existing follow edges in both directions and blocks follow/message/call/content/media access across the blocked boundary.
 - Availability endpoints have dedicated rate limiting. Notification unread totals are available to the UI so Updates can show a badge.
 - Settings includes a **Blocked accounts** section (`GET /api/blocks`) where blocked accounts can be reviewed and unblocked.
@@ -39,6 +39,6 @@ The source changes were reviewed for consistency and JavaScript/JSX syntax shoul
 - Google OAuth needs real provider credentials to exercise the full flow.
 - TURN is not configured by default.
 - Presence and live call rooms are single-process in memory.
-- Story/file physical cleanup and production-grade media processing are still follow-up work.
+- Legacy local media migration to MinIO, object-storage lifecycle cleanup, and production-grade media processing/CDN remain follow-up work.
 - Reports have no admin review UI or endpoints yet (review via the database), no reporter notifications, and no automated action on reported content.
 - Comments, stories, reels and direct messages cannot be reported individually yet; report the account or the post instead.

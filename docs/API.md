@@ -79,3 +79,7 @@ Connect with `withCredentials: true`. Authentication comes from the Auth.js cook
 All client → server events validate payloads and authenticate/authorize the current user. Client-supplied resource IDs never substitute for server-side ownership checks.
 
 RTP audio/video is carried by mediasoup WebRTC transports, not Socket.IO.
+
+### Media delivery
+
+`GET /api/media?key=<encoded s3://bucket/object-key>` validates the authenticated viewer's access to a media object and responds with a short-lived redirect to the private MinIO/S3-compatible object. New image/video clients should use the `url` returned by APIs through the frontend `mediaUrl()` helper rather than constructing object-storage URLs themselves.

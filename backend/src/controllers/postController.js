@@ -89,7 +89,7 @@ async function create(req, res) {
   const persisted = [];
   let post;
   try {
-    for (const file of body.files) persisted.push(await persistUpload(file));
+    for (const file of body.files) persisted.push(await persistUpload(file, 'posts'));
     const tags = [...new Set((body.caption.match(/#[\p{L}\p{N}_]+/gu) || []).map((tag) => tag.slice(1).toLowerCase()).filter(Boolean))].slice(0, 30);
     post = await prisma.post.create({
       data: {

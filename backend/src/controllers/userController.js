@@ -54,7 +54,7 @@ async function updateAvatar(req, res) {
     await require('node:fs/promises').rm(req.file.path, { force: true });
     throw new HttpError(400, 'IMAGE_REQUIRED', 'Profile photos must be images.');
   }
-  const media = await persistUpload(req.file);
+  const media = await persistUpload(req.file, 'avatars');
   if (media.type !== 'IMAGE') throw new HttpError(400, 'IMAGE_REQUIRED', 'Profile photos must be images.');
   const current = await prisma.user.findUnique({ where: { id: req.user.id }, select: { image: true } });
   let profile;

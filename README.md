@@ -6,7 +6,7 @@ Gather is an original responsive social app with a JavaScript Next.js App Router
 
 - Node.js 20 or newer
 - npm 10 or newer
-- Docker Desktop with Compose, or a compatible PostgreSQL 16 instance
+- Docker Desktop with Compose (PostgreSQL 16 + MinIO), or compatible PostgreSQL/S3-compatible storage
 
 ## Local setup (PowerShell)
 
@@ -15,7 +15,7 @@ Run these commands from `A:\in\instagram-clone`.
 ```powershell
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 npm install
-docker compose up -d postgres
+docker compose up -d postgres minio
 npm run db:generate
 npm run db:migrate
 npm run db:seed
@@ -35,7 +35,7 @@ The seed creates fictional demo accounts `maya`, `noah`, `amara`, `leo`, and `so
 ## Data architecture
 
 - PostgreSQL stores users, profiles, follows/follow requests, blocks, posts/media metadata, likes, comments, bookmarks, hashtags, notifications, conversations/messages/read receipts, stories/views, reels, and call metadata.
-- Actual image/video bytes live in the upload storage layer. Local development writes to `uploads/`; production should use object storage plus a CDN.
+- PostgreSQL stores media metadata and an `s3://bucket/object-key` reference. Actual image/video bytes live in S3-compatible object storage. Local development uses MinIO in Docker; production can use S3, Cloudflare R2, or another S3-compatible service plus a CDN.
 - Prisma is the ORM/typed query layer between the JavaScript backend and PostgreSQL.
 - Username and email are normalized before writes and protected by database-level unique constraints for race-safe uniqueness.
 
@@ -80,7 +80,7 @@ npm run build
 npm run test:e2e
 ```
 
-`GET http://localhost:4000/health` reports API and PostgreSQL health. Current development upload limits are 12 MB per image and 120 MB per video.
+`GET http://localhost:4000/health` reports API, PostgreSQL, and MinIO health. Current development upload limits are 12 MB per image and 120 MB per video. New media is uploaded into private MinIO storage and served to the browser through short-lived presigned URLs.
 
 ## Documentation
 
@@ -90,3 +90,4 @@ npm run test:e2e
 - [Current status](STATUS.md)
 - [Follow-up work](TODO.md)
 - [Security notes](SECURITY.md)
+- [Media storage](STORAGE.md)

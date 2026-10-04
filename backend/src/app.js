@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const path = require('node:path');
-const { frontendUrl, uploadDir, nodeEnv } = require('./config/env');
+const { frontendUrl, uploadDir, nodeEnv, storage } = require('./config/env');
 const api = require('./routes');
 const mediaAccess = require('./middleware/mediaAccess');
 const { HttpError } = require('./utils/http');
@@ -17,8 +17,11 @@ app.use('/uploads', mediaAccess, express.static(uploadDir, { dotfiles: 'deny', m
 
 app.get('/health', async (_req, res) => {
   let database = 'unavailable';
+  let mediaStorage = storage.enabled ? 'unavailable' : 'disabled';
   try { await require('./config/prisma').$queryRaw`SELECT 1`; database = 'connected'; } catch { /* status remains unavailable */ }
-  res.status(database === 'connected' ? 200 : 503).json({ status: database === 'connected' ? 'ok' : 'degraded', database, timestamp: new Date().toISOString() });
+  if (storage.enabled) { try { mediaStorage = (await require('./services/minio').check()) ? 'connected' : 'unavailable'; } catch { mediaStorage = 'unavailable'; } }
+  const healthy = database === 'connected' && (!storage.enabled || mediaStorage === 'connected');
+  res.status(healthy ? 200 : 503).json({ status: healthy ? 'ok' : 'degraded', database, mediaStorage, timestamp: new Date().toISOString() });
 });
 app.use('/api', api);
 app.use((_req, _res, next) => next(new HttpError(404, 'NOT_FOUND', 'That endpoint does not exist.')));

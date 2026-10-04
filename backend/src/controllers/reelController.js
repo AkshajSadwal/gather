@@ -23,7 +23,7 @@ async function create(req, res) {
     await require('node:fs/promises').rm(req.file.path, { force: true });
     throw new HttpError(400, 'VIDEO_REQUIRED', 'Reels require a video file.');
   }
-  const media = await persistUpload(req.file);
+  const media = await persistUpload(req.file, 'reels');
   if (media.type !== 'VIDEO') throw new HttpError(400, 'VIDEO_REQUIRED', 'Reels require a video file.');
   const caption = String(req.body.caption || '').trim().slice(0, 2200);
   let reel;
