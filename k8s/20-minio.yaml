@@ -71,6 +71,8 @@ spec:
           volumeMounts:
             - name: minio-data
               mountPath: /bitnami/minio/data
+            - name: minio-tmp
+              mountPath: /opt/bitnami/minio/tmp
 
           readinessProbe:
             httpGet:
@@ -89,6 +91,9 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 6
+      volumes:
+        - name: minio-tmp
+          emptyDir: {}
 
   volumeClaimTemplates:
     - metadata:

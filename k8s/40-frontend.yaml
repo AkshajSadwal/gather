@@ -4,8 +4,8 @@ metadata:
   name: gather-frontend-config
 data:
   NODE_ENV: "production"
-  AUTH_URL: "http://localhost:30080"
-  NEXTAUTH_URL: "http://localhost:30080"
+  AUTH_URL: "http://localhost:3000"
+  NEXTAUTH_URL: "http://localhost:3000"
   BACKEND_URL: "http://backend:4000"
   NEXT_PUBLIC_GOOGLE_LOGIN: "false"
 ---
@@ -14,14 +14,13 @@ kind: Service
 metadata:
   name: frontend
 spec:
-  type: NodePort
+  type: LoadBalancer
   selector:
     app: gather-frontend
   ports:
     - name: http
       port: 3000
       targetPort: 3000
-      nodePort: 30080
 ---
 apiVersion: apps/v1
 kind: Deployment
