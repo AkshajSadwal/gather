@@ -8,7 +8,7 @@ const backendRequire = createRequire(path.resolve(__dirname, '../backend/package
 const { encode } = backendRequire('@auth/core/jwt');
 const { normalizeEmail, normalizeUsername, validUsername } = require('../backend/src/utils/normalize');
 const { identify } = require('../backend/src/services/storage');
-const { sessionUserFromCookie, SESSION_COOKIE_NAME } = require('../backend/src/middleware/auth');
+const { sessionUserFromCookie, SESSION_COOKIE_NAME, setSessionUserLookup, resetSessionUserLookup } = require('../backend/src/middleware/auth');
 const { MediasoupService } = require('../backend/src/services/mediasoupService');
 const { reportSchema, REPORT_REASONS } = require('../backend/src/utils/reportSchema');
 
@@ -29,7 +29,9 @@ test('media signature checks recognize supported formats and reject fake image b
   assert.equal(await identify(Buffer.from('plain text is not media')), null);
 });
 
-test('backend accepts only the active Auth.js session cookie and its subject', async () => {
+test('backend accepts only the active Auth.js session cookie and its subject', async (t) => {
+  setSessionUserLookup(async (id) => ({ id, passwordChangedAt: null }));
+  t.after(resetSessionUserLookup);
   const name = SESSION_COOKIE_NAME;
   const token = await encode({ token: { sub: 'user-unit-1', email: 'unit@example.test' }, secret: process.env.AUTH_SECRET, salt: name, maxAge: 3600 });
   const valid = await sessionUserFromCookie(`${name}=${encodeURIComponent(token)}`);
@@ -52,6 +54,35 @@ test('backend accepts only the active Auth.js session cookie and its subject', a
   const mixedCookies = `${legacyName}=${encodeURIComponent(legacyToken)}; ${name}=${encodeURIComponent(activeToken)}`;
   const mixed = await sessionUserFromCookie(mixedCookies);
   assert.equal(mixed.id, 'right-user');
+});
+
+test('session lookup rejects an unknown user without connecting to the database', async (t) => {
+  setSessionUserLookup(async () => null);
+  t.after(resetSessionUserLookup);
+  const name = SESSION_COOKIE_NAME;
+  const token = await encode({ token: { sub: 'unknown-unit-user' }, secret: process.env.AUTH_SECRET, salt: name, maxAge: 3600 });
+  assert.equal(await sessionUserFromCookie(`${name}=${encodeURIComponent(token)}`), null);
+});
+
+test('session lookup rejects missing or stale authAt after a password change', async (t) => {
+  const authAt = Math.floor(Date.now() / 1000) - 60;
+  setSessionUserLookup(async (id) => ({ id, passwordChangedAt: new Date((authAt + 10) * 1000) }));
+  t.after(resetSessionUserLookup);
+  const name = SESSION_COOKIE_NAME;
+  const stale = await encode({ token: { sub: 'stale-unit-user', authAt }, secret: process.env.AUTH_SECRET, salt: name, maxAge: 3600 });
+  const missing = await encode({ token: { sub: 'missing-auth-at-user' }, secret: process.env.AUTH_SECRET, salt: name, maxAge: 3600 });
+  assert.equal(await sessionUserFromCookie(`${name}=${encodeURIComponent(stale)}`), null);
+  assert.equal(await sessionUserFromCookie(`${name}=${encodeURIComponent(missing)}`), null);
+});
+
+test('session lookup accepts authAt later than passwordChangedAt', async (t) => {
+  const authAt = Math.floor(Date.now() / 1000);
+  setSessionUserLookup(async (id) => ({ id, passwordChangedAt: new Date((authAt - 10) * 1000) }));
+  t.after(resetSessionUserLookup);
+  const name = SESSION_COOKIE_NAME;
+  const token = await encode({ token: { sub: 'fresh-unit-user', authAt }, secret: process.env.AUTH_SECRET, salt: name, maxAge: 3600 });
+  const user = await sessionUserFromCookie(`${name}=${encodeURIComponent(token)}`);
+  assert.equal(user.id, 'fresh-unit-user');
 });
 
 test('mediasoup worker creates one room with deduplicated send and receive transports and closes cleanly', async () => {

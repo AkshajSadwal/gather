@@ -34,7 +34,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   callbacks: {
     authorized({ auth }) { return Boolean(auth?.user); },
     async jwt({ token, user, account }) {
-      if (user && account?.provider === 'credentials') { token.sub = user.id; token.username = user.username; token.authAt = Date.now(); }
+      if (user && account?.provider === 'credentials') { token.sub = user.id; token.username = user.username; token.authAt = Math.floor(Date.now() / 1000); }
       if (user && account?.provider === 'google') {
         const response = await fetch(`${backend}/api/auth/google-sync`, {
           method: 'POST', headers: { 'content-type': 'application/json', 'x-internal-auth': process.env.INTERNAL_AUTH_SECRET || '' },
@@ -44,7 +44,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         if (!response.ok || !payload.data?.user?.id) throw new Error('Google account could not be connected to the app account.');
         token.sub = payload.data.user.id;
         token.username = payload.data.user.username;
-        token.authAt = Date.now();
+        token.authAt = Math.floor(Date.now() / 1000);
       }
       return token;
     },

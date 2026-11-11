@@ -5,11 +5,13 @@ const prisma = require('../config/prisma');
 
 const USER_CACHE_TTL_MS = 30 * 1000;
 const sessionUserCache = new Map();
+const prismaSessionUserLookup = (userId) => prisma.user.findUnique({ where: { id: userId }, select: { id: true, passwordChangedAt: true } });
+let sessionUserLookup = prismaSessionUserLookup;
 
 async function existingSessionUser(userId) {
   const cached = sessionUserCache.get(userId);
   if (cached && cached.expiresAt > Date.now()) return cached.user;
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, passwordChangedAt: true } });
+  const user = await sessionUserLookup(userId);
   if (sessionUserCache.size > 5000) sessionUserCache.clear();
   sessionUserCache.set(userId, { user, expiresAt: Date.now() + USER_CACHE_TTL_MS });
   return user;
@@ -17,6 +19,16 @@ async function existingSessionUser(userId) {
 
 function invalidateSessionUserCache(userId) {
   sessionUserCache.delete(userId);
+}
+
+function setSessionUserLookup(lookup) {
+  if (lookup !== null && typeof lookup !== 'function') throw new TypeError('Session user lookup must be a function or null.');
+  sessionUserLookup = lookup || prismaSessionUserLookup;
+  sessionUserCache.clear();
+}
+
+function resetSessionUserLookup() {
+  setSessionUserLookup(null);
 }
 
 // This must exactly match the session cookie name configured by Auth.js in
@@ -50,7 +62,9 @@ async function sessionUserFromCookie(cookieHeader) {
       const databaseUser = await existingSessionUser(userId);
       if (!databaseUser) return null;
       const authAt = Number(payload.authAt) || null;
-      if (databaseUser.passwordChangedAt && (!authAt || authAt < databaseUser.passwordChangedAt.getTime())) return null;
+      const changedAtMs = databaseUser.passwordChangedAt ? new Date(databaseUser.passwordChangedAt).getTime() : null;
+      const authAtMs = authAt ? (authAt > 1_000_000_000_000 ? authAt : authAt * 1000) : null;
+      if (changedAtMs && (!authAtMs || authAtMs < changedAtMs)) return null;
       return { id: userId, email: payload.email, name: payload.name, username: payload.username, authAt };
     }
   } catch { /* Invalid, expired, or malformed session cookie. */ }
@@ -76,4 +90,4 @@ function requireInternal(req, _res, next) {
   next();
 }
 
-module.exports = { requireAuth, requireInternal, sessionUserFromCookie, invalidateSessionUserCache, getCookie, SESSION_COOKIE_NAME };
+module.exports = { requireAuth, requireInternal, sessionUserFromCookie, invalidateSessionUserCache, setSessionUserLookup, resetSessionUserLookup, getCookie, SESSION_COOKIE_NAME };
