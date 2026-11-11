@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
-    "test": "node --test ../tests/unit.test.js ../tests/backend.integration.test.js",
+    "test": "node --test ../tests/unit.test.js ../tests/backend.integration.test.js ../tests/features.integration.test.js",
     "lint": "node src/check.js"
   },
   "dependencies": {

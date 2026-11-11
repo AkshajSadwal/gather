@@ -2,12 +2,14 @@ const prisma = require('../config/prisma');
 const { HttpError, ok } = require('../utils/http');
 const { persistUpload, removeLocal } = require('../services/storage');
 const { isBlockedBetween, getBlockedUserIds } = require('../services/blocks');
+const { mutedIdsFor } = require('../services/relations');
 
 async function list(req, res) {
   const now = new Date();
   const blockedIds = await getBlockedUserIds(req.user.id);
+  const hiddenIds = [...new Set([...blockedIds, ...await mutedIdsFor(req.user.id)])];
   const following = await prisma.follow.findMany({ where: { followerId: req.user.id, accepted: true }, select: { followedId: true } });
-  const users = [...following.map((item) => item.followedId), req.user.id].filter((id) => !blockedIds.includes(id));
+  const users = [...following.map((item) => item.followedId), req.user.id].filter((id) => !hiddenIds.includes(id));
   const stories = await prisma.story.findMany({ where: { authorId: { in: users }, expiresAt: { gt: now } }, orderBy: { createdAt: 'asc' }, include: { author: { select: { id: true, username: true, image: true, profile: { select: { avatarUrl: true } } } }, media: true, views: { where: { viewerId: req.user.id }, select: { id: true } }, _count: { select: { views: true } } } });
   const groups = new Map();
   for (const story of stories) {

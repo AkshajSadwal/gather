@@ -1,15 +1,12 @@
 const { z } = require('zod');
 
-const REPORT_REASONS = ['SPAM', 'HARASSMENT', 'HATE_OR_ABUSE', 'NUDITY_OR_SEXUAL', 'VIOLENCE', 'SELF_HARM', 'IMPERSONATION', 'OTHER'];
+const REPORT_REASONS = ['SPAM', 'HARASSMENT', 'INAPPROPRIATE', 'IMPERSONATION', 'OTHER'];
 
-// Exactly one target: an account (by username) or a post (by id).
 const reportSchema = z.object({
-  username: z.string().trim().min(1).max(60).optional(),
-  postId: z.string().trim().min(1).max(64).optional(),
+  targetType: z.enum(['POST', 'COMMENT', 'USER']),
+  targetId: z.string().trim().min(1).max(64),
   reason: z.enum(REPORT_REASONS),
-  details: z.string().trim().max(1000).optional().default('')
-}).refine((value) => Boolean(value.username) !== Boolean(value.postId), {
-  message: 'Report either an account or a post, not both.'
+  details: z.string().trim().max(500).optional().default('')
 });
 
 module.exports = { reportSchema, REPORT_REASONS };

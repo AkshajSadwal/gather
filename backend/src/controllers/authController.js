@@ -91,10 +91,11 @@ async function syncGoogle(req, res) {
 async function me(req, res) {
   const user = await prisma.user.findUnique({
     where: { id: req.user.id },
-    select: { id: true, username: true, email: true, image: true, createdAt: true, profile: true, _count: { select: { followers: { where: { accepted: true } }, following: { where: { accepted: true } }, posts: true } } }
+    select: { id: true, username: true, email: true, image: true, passwordHash: true, createdAt: true, profile: true, _count: { select: { followers: { where: { accepted: true } }, following: { where: { accepted: true } }, posts: true } } }
   });
   if (!user) throw new HttpError(401, 'SESSION_EXPIRED', 'Your account is no longer available. Please sign in again.');
-  return ok(res, { user });
+  const { passwordHash, ...safeUser } = user;
+  return ok(res, { user: { ...safeUser, hasPassword: Boolean(passwordHash) } });
 }
 
 module.exports = { checkUsername, checkEmail, signup, login, syncGoogle, me };

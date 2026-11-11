@@ -83,13 +83,13 @@ test('mediasoup worker creates one room with deduplicated send and receive trans
 });
 
 test('report payloads require exactly one target, a known reason, and bounded details', () => {
-  assert.equal(reportSchema.safeParse({ username: 'maya', reason: 'SPAM' }).success, true);
-  assert.equal(reportSchema.safeParse({ postId: 'abc123', reason: 'OTHER', details: 'why' }).success, true);
-  assert.equal(reportSchema.safeParse({ reason: 'SPAM' }).success, false);
-  assert.equal(reportSchema.safeParse({ username: 'maya', postId: 'abc123', reason: 'SPAM' }).success, false);
-  assert.equal(reportSchema.safeParse({ username: 'maya', reason: 'BOGUS' }).success, false);
-  assert.equal(reportSchema.safeParse({ username: 'maya', reason: 'SPAM', details: 'x'.repeat(1001) }).success, false);
-  assert.equal(reportSchema.parse({ username: 'maya', reason: 'SPAM', details: '  padded  ' }).details, 'padded');
-  assert.equal(reportSchema.parse({ username: 'maya', reason: 'SPAM' }).details, '');
-  assert.equal(REPORT_REASONS.length, 8);
+  assert.equal(reportSchema.safeParse({ targetType: 'USER', targetId: 'abc123', reason: 'SPAM' }).success, true);
+  assert.equal(reportSchema.safeParse({ targetType: 'COMMENT', targetId: 'comment1', reason: 'INAPPROPRIATE', details: 'why' }).success, true);
+  assert.equal(reportSchema.safeParse({ targetId: 'abc123', reason: 'SPAM' }).success, false);
+  assert.equal(reportSchema.safeParse({ targetType: 'STORY', targetId: 'abc123', reason: 'SPAM' }).success, false);
+  assert.equal(reportSchema.safeParse({ targetType: 'POST', targetId: 'abc123', reason: 'BOGUS' }).success, false);
+  assert.equal(reportSchema.safeParse({ targetType: 'POST', targetId: 'abc123', reason: 'SPAM', details: 'x'.repeat(501) }).success, false);
+  assert.equal(reportSchema.parse({ targetType: 'USER', targetId: 'abc123', reason: 'SPAM', details: '  padded  ' }).details, 'padded');
+  assert.equal(reportSchema.parse({ targetType: 'POST', targetId: 'abc123', reason: 'SPAM' }).details, '');
+  assert.equal(REPORT_REASONS.length, 5);
 });

@@ -15,7 +15,7 @@ export function RealtimeProvider({ children }) {
 
   const refreshNotifications = useCallback(async () => {
     if (status !== 'authenticated') { setUnreadNotifications(0); return; }
-    try { const data = await api('/notifications/unread'); setUnreadNotifications(Number(data.total || 0)); } catch {}
+    try { const data = await api('/notifications/unread-count'); setUnreadNotifications(Number(data.total || 0)); } catch {}
   }, [status]);
 
   const refreshUnread = useCallback(async () => {

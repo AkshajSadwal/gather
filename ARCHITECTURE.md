@@ -31,7 +31,8 @@ Key rules:
 - `User.username` and `User.email` are normalized and database-unique.
 - `Follow(followerId, followedId)` is unique; `accepted=false` represents a private-account request.
 - `Block(blockerId, blockedId)` is unique and is used to enforce an interaction/privacy boundary.
-- `Report(reporterId, targetUserId, postId?)` stores private user/post reports with a `status` workflow (`OPEN` → `REVIEWING` → `RESOLVED`/`DISMISSED`). Post reports also set `targetUserId` to the post author so all reports about an account can be queried together.
+- `Report(reporterId, targetType, targetId)` stores private post/comment/user reports with `OPEN`, `REVIEWED`, or `DISMISSED` status and a unique reporter/target key.
+- `Comment.parentId` supports one level of replies; `Message.deletedAt` retains an unsent message record while REST responses redact its body.
 - Post/media, story/media, and reel/media are separate tables so one content item can own multiple media records.
 - Messages are stored before Socket.IO broadcast.
 - `MessageRead` stores per-user read state.
@@ -39,7 +40,9 @@ Key rules:
 
 ## Blocks and privacy
 
-`services/blocks.js` centralizes block-state checks. A block is reciprocal for application behavior: either direction blocks follow, messaging, calling, story viewing, post access, media access, and relevant discovery. Creating a block also removes existing follow rows in both directions so previously granted social access cannot remain active through a stale relationship.
+`services/relations.js` centralizes block and mute lookups. A block is reciprocal for application behavior: either direction blocks follow, messaging, calling, story viewing, post access, media access, and relevant discovery. Creating a block also removes existing follow rows in both directions so previously granted social access cannot remain active through a stale relationship. A mute only hides the selected account's posts, reels, and stories from the muter's lists; it does not change follows or access rights.
+
+Reports can target posts, comments, or accounts visible to the reporter. The reporter cannot report themselves or their own content. Duplicate reports are unique per reporter and target; moderator review tooling is not implemented.
 
 This is deliberately enforced server-side. Hiding buttons in React is not considered authorization.
 
@@ -74,9 +77,12 @@ Multer first writes a random temporary upload under `uploads/.tmp`. `services/st
 
 New browser media URLs go through `GET /api/media?key=...`; the backend authenticates/authorizes access using the post/story/reel/profile owner and privacy/block rules, then returns a short-lived presigned object-storage URL. The browser therefore downloads media directly from MinIO rather than making Express proxy the video/image bytes. Legacy `/uploads/*` remains only for older files created before the MinIO migration.
 
+`services/cleanup.js` periodically removes stories expired for more than one hour and their media, temporary upload files older than one hour, and read notifications older than 90 days. `CLEANUP_INTERVAL_MS` defaults to 30 minutes; the timer is unreferenced, skipped in tests, and cleared during shutdown.
+
 ## Security layers
 
 - request validation with Zod
+- in-process rate limits keyed by account when authenticated and IP otherwise; upload caps also include a separate per-IP limit
 - authentication middleware
 - server-side ownership/membership checks
 - rate limits for auth, availability checks, and writes

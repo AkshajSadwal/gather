@@ -19,6 +19,11 @@ async function profile(req, res) {
   if (!user) throw new HttpError(404, 'USER_NOT_FOUND', 'That profile could not be found.');
   const isSelf = req.user?.id === user.id;
   const blockState = isSelf ? { blocked: false, blockedBy: false } : await getBlockState(req.user?.id, user.id);
+  const mute = req.user?.id && !isSelf ? await prisma.mute.findUnique({ where: { muterId_mutedId: { muterId: req.user.id, mutedId: user.id } }, select: { id: true } }) : null;
+  if (blockState.blockedBy) throw new HttpError(404, 'USER_NOT_FOUND', 'That profile could not be found.');
+  if (blockState.blocked) {
+    return ok(res, { user: { id: user.id, username: user.username, image: user.image, profile: null, _count: { followers: 0, following: 0, posts: 0 }, isSelf: false, isFollowing: false, isFollowPending: false, canView: false, isBlocked: true, isBlockedBy: false, isMuted: Boolean(mute) }, posts: [] });
+  }
   const isFollowing = user.followers.length > 0 && !blockState.blocked && !blockState.blockedBy;
   const pendingRelation = req.user?.id ? await prisma.follow.findUnique({ where: { followerId_followedId: { followerId: req.user.id, followedId: user.id } }, select: { accepted: true } }) : null;
   const isFollowPending = Boolean(pendingRelation && !pendingRelation.accepted);
@@ -31,7 +36,7 @@ async function profile(req, res) {
     canView ? prisma.post.findMany({ where: { authorId: user.id }, orderBy: { createdAt: 'desc' }, take: 24, include: { author: { select: { id: true, username: true, image: true, profile: true } }, media: { orderBy: { position: 'asc' } }, likes: { where: { userId: req.user?.id || '__visitor__' }, select: { id: true }, take: 1 }, bookmarks: { where: { userId: req.user?.id || '__visitor__' }, select: { id: true }, take: 1 }, _count: { select: { likes: true, comments: true } } } }) : Promise.resolve([])
   ]);
   const shapedPosts = posts.map((post) => ({ ...post, isLiked: post.likes.length > 0, isBookmarked: post.bookmarks.length > 0, likes: undefined, bookmarks: undefined }));
-  return ok(res, { user: { ...user, followers: undefined, _count: { followers: followersCount, following: followingCount, posts: postsCount }, isSelf, isFollowing, isFollowPending, canView, isBlocked: blockState.blocked, isBlockedBy: blockState.blockedBy }, posts: shapedPosts });
+  return ok(res, { user: { ...user, followers: undefined, _count: { followers: followersCount, following: followingCount, posts: postsCount }, isSelf, isFollowing, isFollowPending, canView, isBlocked: blockState.blocked, isBlockedBy: blockState.blockedBy, isMuted: Boolean(mute) }, posts: shapedPosts });
 }
 
 async function updateProfile(req, res) {
@@ -91,6 +96,14 @@ async function follow(req, res) {
   const existing = await prisma.follow.findUnique({ where: { followerId_followedId: { followerId: req.user.id, followedId: target.id } } });
   if (existing) {
     await prisma.follow.delete({ where: { id: existing.id } });
+    await prisma.notification.deleteMany({
+      where: {
+        recipientId: target.id,
+        actorId: req.user.id,
+        type: existing.accepted ? 'FOLLOW' : 'FOLLOW_REQUEST',
+        entityId: existing.id
+      }
+    });
     return ok(res, { following: false, cancelledRequest: !existing.accepted });
   }
   const pending = target.profile?.visibility === 'PRIVATE';
@@ -148,6 +161,9 @@ async function updateFollowRequest(req, res) {
     });
   }
   await prisma.follow.delete({ where: { id: relation.id } });
+  await prisma.notification.deleteMany({
+    where: { recipientId: req.user.id, actorId: relation.followerId, type: 'FOLLOW_REQUEST', entityId: relation.id }
+  });
   return ok(res, { accepted: false });
 }
 

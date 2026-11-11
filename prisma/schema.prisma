@@ -16,6 +16,7 @@ enum NotificationType {
   FOLLOW_REQUEST
   LIKE
   COMMENT
+  REPLY
   MENTION
   MESSAGE
   STORY_VIEW
@@ -39,20 +40,21 @@ enum CallStatus {
   FAILED
 }
 
+enum ReportTargetType {
+  POST
+  COMMENT
+  USER
+}
 enum ReportReason {
   SPAM
   HARASSMENT
-  HATE_OR_ABUSE
-  NUDITY_OR_SEXUAL
-  VIOLENCE
-  SELF_HARM
+  INAPPROPRIATE
   IMPERSONATION
   OTHER
 }
 enum ReportStatus {
   OPEN
-  REVIEWING
-  RESOLVED
+  REVIEWED
   DISMISSED
 }
 
@@ -83,8 +85,9 @@ model User {
   callsReceived       CallSession[] @relation("callRecipient")
   blocksCreated      Block[] @relation("blocker")
   blocksReceived     Block[] @relation("blocked")
+  mutesCreated       Mute[] @relation("muter")
+  mutesReceived      Mute[] @relation("muted")
   reportsFiled       Report[] @relation("reportFiled")
-  reportsAgainst     Report[] @relation("reportTarget")
 }
 
 
@@ -96,26 +99,34 @@ model Block {
   blocked   User     @relation("blocked", fields: [blockedId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
   @@unique([blockerId, blockedId])
+  @@index([blockerId, createdAt])
   @@index([blockedId, createdAt])
 }
 
+model Mute {
+  id        String   @id @default(cuid())
+  muterId   String
+  mutedId   String
+  muter     User     @relation("muter", fields: [muterId], references: [id], onDelete: Cascade)
+  muted     User     @relation("muted", fields: [mutedId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  @@unique([muterId, mutedId])
+  @@index([muterId, createdAt])
+  @@index([mutedId, createdAt])
+}
+
 model Report {
-  id           String       @id @default(cuid())
-  reporterId   String
-  targetUserId String
-  postId       String?
-  reason       ReportReason
-  details      String       @default("") @db.VarChar(1000)
-  status       ReportStatus @default(OPEN)
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  reporter     User         @relation("reportFiled", fields: [reporterId], references: [id], onDelete: Cascade)
-  targetUser   User         @relation("reportTarget", fields: [targetUserId], references: [id], onDelete: Cascade)
-  post         Post?        @relation(fields: [postId], references: [id], onDelete: Cascade)
+  id         String           @id @default(cuid())
+  reporterId String
+  targetType ReportTargetType
+  targetId   String
+  reason     ReportReason
+  details    String?          @db.VarChar(500)
+  status     ReportStatus     @default(OPEN)
+  createdAt  DateTime         @default(now())
+  reporter   User             @relation("reportFiled", fields: [reporterId], references: [id], onDelete: Cascade)
+  @@unique([reporterId, targetType, targetId])
   @@index([status, createdAt])
-  @@index([targetUserId, createdAt])
-  @@index([postId])
-  @@index([reporterId, createdAt])
 }
 
 model Profile {
@@ -158,7 +169,6 @@ model Post {
   bookmarks Bookmark[]
   hashtags  PostHashtag[]
   reel      Reel?
-  reports   Report[]
   @@index([authorId, createdAt])
   @@index([createdAt])
 }
@@ -198,9 +208,13 @@ model Comment {
   user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
   post      Post @relation(fields: [postId], references: [id], onDelete: Cascade)
   body      String @db.VarChar(1000)
+  parentId  String?
+  parent    Comment? @relation("commentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   Comment[] @relation("commentReplies")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   @@index([postId, createdAt])
+  @@index([postId, parentId, createdAt])
 }
 
 model Bookmark {
@@ -275,6 +289,7 @@ model Message {
   body           String @db.VarChar(4000)
   createdAt      DateTime @default(now())
   deliveredAt    DateTime?
+  deletedAt      DateTime?
   reads          MessageRead[]
   @@index([conversationId, createdAt])
 }

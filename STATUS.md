@@ -1,6 +1,6 @@
 # Status
 
-Last reviewed: 2026-10-03
+Last reviewed: 2026-11-12
 
 ## Current implementation
 
@@ -11,8 +11,15 @@ Last reviewed: 2026-10-03
 - Private MinIO/S3-compatible media storage behind a storage service with MIME/signature/size checks. New uploads use `s3://` object references and short-lived presigned URLs; legacy `/uploads` serving remains for older local media during migration.
 - Server-side block system that removes existing follow edges in both directions and blocks follow/message/call/content/media access across the blocked boundary.
 - Availability endpoints have dedicated rate limiting. Notification unread totals are available to the UI so Updates can show a badge.
+- Signup/login and Socket.IO message sends are rate-limited; avatar, post, story, and reel uploads now have per-account and per-IP hourly limits before multipart parsing.
+- Notifications deduplicate identical unread events, expose an unread-count alias, and link to their target. Account owners can remove comments from their posts; rate limits cover search, reads, deletes, and authenticated-account keys.
+- Mute preferences hide selected accounts' feed posts, reels, and stories. Blocked profiles return a minimal unblock view to the blocker and 404 to the blocked viewer.
+- Comments support cursor pagination, one-level replies, comment mentions, replies notifications, and a shared panel across posts and reels.
+- Own profiles have a Saved tab; post owners can edit captions, re-sync hashtags, and notify newly added mentions.
+- Message senders can unsend their messages; REST previews redact the body and participants receive `message:deleted` in real time.
+- Settings supports password changes and confirmed account deletion; a periodic cleanup removes expired stories, stale temporary files, and old read notifications.
 - Settings includes a **Blocked accounts** section (`GET /api/blocks`) where blocked accounts can be reviewed and unblocked.
-- Users can **report** accounts (profile) and posts (post menu). Reports are stored privately in a `Report` table with a status workflow; repeat reports for the same open target are deduplicated and reports are rate-limited.
+- Users can **report** accounts, posts, and comments. Reports are private, deduplicated per reporter/target, and limited to 10 per hour per account.
 
 ## Recent hardening/features
 
@@ -25,7 +32,7 @@ Last reviewed: 2026-10-03
 
 ## Validation status
 
-The source changes were reviewed for consistency and JavaScript/JSX syntax should be re-run in the user's working copy after applying this update. Full live PostgreSQL/mediasoup/Playwright validation is environment-dependent and is not claimed for this patch artifact.
+Backend syntax checks, frontend lint, and Prisma schema validation pass. PostgreSQL integration tests, mediasoup behavior, and Playwright were not run in this environment.
 
 ## Latest pass (2026-10-03, second update)
 
@@ -39,8 +46,8 @@ The source changes were reviewed for consistency and JavaScript/JSX syntax shoul
 - Google OAuth needs real provider credentials to exercise the full flow.
 - TURN is not configured by default.
 - Presence and live call rooms are single-process in memory.
-- Legacy local media migration to MinIO, object-storage lifecycle cleanup, and production-grade media processing/CDN remain follow-up work.
-- Reports have no admin review UI or endpoints yet (review via the database), no reporter notifications, and no automated action on reported content.
+- Legacy local media migration to MinIO, lifecycle policies for orphaned object-storage keys, and production-grade media processing/CDN remain follow-up work.
+- Reports have no moderator UI or review endpoints yet (review via the database), no reporter notifications, and no automated action on reported content.
 - Comments, stories, reels and direct messages cannot be reported individually yet; report the account or the post instead.
 
 ## Latest infrastructure pass (2026-10-04)
@@ -50,3 +57,8 @@ The source changes were reviewed for consistency and JavaScript/JSX syntax shoul
 - Added Kubernetes baseline manifests for PostgreSQL, MinIO AIStor, the single backend replica, frontend, and a separate migration Job.
 - Hardened uploads so media-type detection reads only a bounded header buffer instead of loading an entire video/image into memory.
 - Added startup cleanup for stale Multer temporary uploads and immutable-object cache metadata for new MinIO objects.
+
+## Latest feature pass (2026-11-12)
+
+- Added account/IP request limits, unread notification links and count, comment owner deletion, block/mute controls, visible-target reporting, paginated replies, saved posts, editable captions, message unsend, account management, and scheduled cleanup.
+- Added schema migration `20261112000000_blocks_reports_replies` and compact feature integration coverage. Prisma validate and workspace lint passed; PostgreSQL integration and E2E tests were not run.

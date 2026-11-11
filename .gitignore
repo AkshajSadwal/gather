@@ -18,3 +18,4 @@ prisma/dev.db
 /test-results/
 /playwright-report/
 minio.license
+/CODEX_PROGRESS.md

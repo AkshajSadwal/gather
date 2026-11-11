@@ -120,18 +120,22 @@ export default function AppShell({ children, right = false }) {
     const action = notificationActions[item.id];
     const busy = Boolean(notificationBusy[item.id]);
     const isRequest = item.type === 'FOLLOW_REQUEST';
+    const isPostActivity = ['LIKE', 'COMMENT', 'MENTION', 'REPLY'].includes(item.type);
+    const targetHref = isPostActivity && item.entityId
+      ? `/post/${item.entityId}`
+      : item.actor?.username ? `/profile/${item.actor.username}` : '/';
 
     return <div key={item.id} className="border-b border-line py-3">
       <div className="flex items-start gap-3">
         <Avatar src={item.actor?.image} name={item.actor?.username} size="xs" />
-        <button
-          type="button"
-          onClick={() => markNotificationAsRead(item)}
+        <Link
+          href={targetHref}
+          onClick={() => { void markNotificationAsRead(item); setNotificationsOpen(false); }}
           className="min-w-0 flex-1 text-left text-sm"
         >
-          <p><b>{item.actor?.username || 'Someone'}</b> {item.type === 'FOLLOW' ? 'started following you' : isRequest ? 'requested to follow you' : item.type === 'LIKE' ? 'liked your post' : item.type === 'COMMENT' ? 'commented on your post' : item.type === 'MENTION' ? 'mentioned you' : 'viewed your story'}</p>
+          <p><b>{item.actor?.username || 'Someone'}</b> {item.type === 'FOLLOW' ? 'started following you' : isRequest ? 'requested to follow you' : item.type === 'LIKE' ? 'liked your post' : item.type === 'COMMENT' ? 'commented on your post' : item.type === 'REPLY' ? 'replied to your comment' : item.type === 'MENTION' ? 'mentioned you' : 'viewed your story'}</p>
           {!item.readAt && !action && <span className="mt-1 inline-block h-2 w-2 rounded-full bg-coral" />}
-        </button>
+        </Link>
       </div>
 
       {isRequest && !action && item.followRequestId && (
@@ -177,7 +181,7 @@ export default function AppShell({ children, right = false }) {
       <nav className="grid gap-1">
         {links.map(({ href, label, icon }) => actionLink(href, label, icon, pathname === href || (href !== '/' && pathname.startsWith(href))))}
         <button onClick={() => setNotificationsOpen(!notificationsOpen)} className="flex items-center gap-4 rounded-2xl px-4 py-3.5 text-left text-[15px] text-ink/75 transition hover:bg-white">
-          <span className="relative"><Bell size={21} strokeWidth={1.8} />{unreadNotifications > 0 && <span aria-label={`${unreadNotifications} unread updates`} className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-paper bg-red-500" />}</span>Updates
+          <span className="relative"><Bell size={21} strokeWidth={1.8} />{unreadNotifications > 0 && <span aria-label={`${unreadNotifications} unread updates`} className="absolute -right-3 -top-2 min-w-4 rounded-full bg-coral px-1 text-center text-[9px] font-bold leading-4 text-white">{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}</span>Updates
         </button>
         <button onClick={() => setCompose(true)} className="flex items-center gap-4 rounded-2xl px-4 py-3.5 text-left text-[15px] text-ink/75 transition hover:bg-white"><Plus size={21} />Create</button>
         <Link href={me?.username ? `/profile/${me.username}` : '/login'} className={`flex items-center gap-3 rounded-2xl px-4 py-3.5 text-[15px] transition hover:bg-white ${pathname.startsWith('/profile') ? 'bg-white font-semibold' : 'text-ink/75'}`}><Avatar src={me?.image} name={me?.name || me?.email} size="xs" /><span>Profile</span></Link>

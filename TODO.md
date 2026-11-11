@@ -1,27 +1,9 @@
 # Follow-up work
 
-## Before a public deployment
+## Remaining product and deployment work
 
-- Configure Google OAuth and validate the real two-browser mediasoup voice/video flow over HTTPS.
-- Add TURN credentials and verify restrictive NAT/firewall paths.
-- Move local uploads to an S3-compatible/object-storage adapter and add CDN delivery.
-- Add malware scanning, deeper media codec/signature validation, transcoding, thumbnails, quotas, and cleanup jobs.
-- Add email verification, account recovery, and a documented password/session policy.
-- Build moderator tooling on top of the `Report` table: an admin role, a review queue, status changes, content takedown, and repeat-offender handling. Add reporter-facing outcome notices and an abuse-response path/SLA.
-- Add distributed Socket.IO/presence/call coordination before running multiple backend instances.
-- Add rate-limit state shared across instances when distributed deployment is introduced.
-
-## Product improvements
-
-- Extend reporting to comments, stories, reels, and direct messages.
-- Add richer privacy controls for who can message, mention, or interact with an account.
-- Add message delivery reliability when a browser is offline for an extended period.
-- Add stronger feed/reel ranking and media preloading when real traffic requires it.
-- Add broader Playwright coverage for desktop/mobile and real device media behavior.
-
-## Kubernetes / operations
-
-- Put frontend/backend behind HTTPS ingress and configure production domains/CORS/cookies.
-- Replace the single-node PostgreSQL/MinIO StatefulSets with managed/HA infrastructure for serious production.
-- Add observability (metrics, tracing, centralized logs) and backup/restore automation.
-- Add distributed Socket.IO/call coordination before increasing backend replicas.
+- Build moderator tooling for reviewing reports and handling repeat offenders.
+- Add an S3-compatible storage adapter for production object storage.
+- Add email verification and account recovery.
+- Configure TURN for restrictive NAT/firewall paths.
+- Add distributed Socket.IO, presence, and call coordination before running multiple backend instances.

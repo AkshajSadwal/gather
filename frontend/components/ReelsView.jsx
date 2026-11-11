@@ -7,6 +7,7 @@ import { Bookmark, Heart, MessageCircle, Pause, Play, Plus, Share2, Volume2, Vol
 import Avatar from './Avatar';
 import { api, mediaUrl } from '../lib/api';
 import { useToast } from './Providers';
+import CommentsPanel from './CommentsPanel';
 
 export default function ReelsView() {
   const { data: session, status } = useSession();
@@ -22,10 +23,6 @@ export default function ReelsView() {
   const [file, setFile] = useState(null);
   const [composer, setComposer] = useState(false);
   const [commentReel, setCommentReel] = useState(null);
-  const [commentItems, setCommentItems] = useState([]);
-  const [commentsLoading, setCommentsLoading] = useState(false);
-  const [commentText, setCommentText] = useState('');
-  const [commentBusy, setCommentBusy] = useState(false);
   const videos = useRef(new Map());
   const refs = useRef(new Map());
   const containerRef = useRef(null);
@@ -118,55 +115,14 @@ export default function ReelsView() {
     } catch (error) { if (error.name !== 'AbortError') notify('Could not share this reel.', 'error'); }
   };
 
-  const openComments = async (reel) => {
+  const openComments = (reel) => {
     if (!reel.post?.id) return;
     const video = videos.current.get(reel.id);
     if (video && !video.paused) video.pause();
     setCommentReel(reel);
-    setCommentItems([]);
-    setCommentText('');
-    setCommentsLoading(true);
-    try {
-      const data = await api(`/posts/${encodeURIComponent(reel.post.id)}/comments?limit=100`);
-      setCommentItems(data.comments || []);
-    } catch (error) {
-      setCommentReel(null);
-      notify(error.message, 'error');
-    } finally {
-      setCommentsLoading(false);
-    }
   };
 
-  const closeComments = () => {
-    setCommentReel(null);
-    setCommentItems([]);
-    setCommentText('');
-  };
-
-  const sendReelComment = async (event) => {
-    event.preventDefault();
-    if (!commentReel?.post?.id || !commentText.trim() || commentBusy || status !== 'authenticated') return;
-    const text = commentText.trim();
-    setCommentBusy(true);
-    try {
-      const data = await api(`/posts/${encodeURIComponent(commentReel.post.id)}/comments`, {
-        method: 'POST',
-        body: JSON.stringify({ body: text })
-      });
-      setCommentItems((items) => [data.comment, ...items]);
-      setCommentText('');
-      setReels((items) => items.map((item) => item.id === commentReel.id
-        ? { ...item, post: { ...item.post, _count: { ...item.post._count, comments: (item.post?._count?.comments || 0) + 1 } } }
-        : item));
-      setCommentReel((value) => value
-        ? { ...value, post: { ...value.post, _count: { ...value.post._count, comments: (value.post?._count?.comments || 0) + 1 } } }
-        : value);
-    } catch (error) {
-      notify(error.message, 'error');
-    } finally {
-      setCommentBusy(false);
-    }
-  };
+  const closeComments = () => setCommentReel(null);
 
   const create = async (event) => {
     event.preventDefault();
@@ -243,12 +199,7 @@ export default function ReelsView() {
     {commentReel && <div role="dialog" aria-modal="true" aria-label="Comments" className="fixed inset-0 z-50 bg-black/50 p-0 sm:grid sm:place-items-center sm:p-5" onMouseDown={(event) => { if (event.target === event.currentTarget) closeComments(); }}>
       <section className="absolute bottom-0 left-0 right-0 max-h-[82vh] rounded-t-[28px] bg-white text-ink shadow-soft sm:static sm:w-full sm:max-w-lg sm:rounded-[28px]">
         <header className="flex items-center justify-between border-b border-line px-5 py-4"><div><h2 className="font-semibold">Comments</h2><p className="text-xs text-ink/50">{commentReel.author?.username ? `@${commentReel.author.username}'s reel` : 'Reel'}</p></div><button type="button" onClick={closeComments} aria-label="Close comments" className="rounded-full p-2 hover:bg-paper"><X size={19} /></button></header>
-        <div className="max-h-[58vh] space-y-4 overflow-y-auto px-5 py-4">
-          {commentsLoading ? <p className="py-8 text-center text-sm text-ink/50">Loading comments…</p> : commentItems.length ? commentItems.map((item) => <div key={item.id} className="flex gap-3"><Avatar src={item.user.image} name={item.user.username} size="xs" /><div className="min-w-0 flex-1"><Link href={`/profile/${item.user.username}`} onClick={closeComments} className="text-sm font-semibold hover:underline">@{item.user.username}</Link><p className="mt-0.5 break-words text-sm leading-6">{item.body}</p><p className="mt-1 text-[11px] text-ink/40">{new Date(item.createdAt).toLocaleDateString()}</p></div></div>) : <p className="py-8 text-center text-sm text-ink/50">No comments yet. Be the first to comment.</p>}
-        </div>
-        <form onSubmit={sendReelComment} className="flex gap-2 border-t border-line p-4">
-          {status === 'authenticated' ? <><input autoFocus value={commentText} onChange={(event) => setCommentText(event.target.value)} maxLength={1000} placeholder="Add a comment…" className="min-w-0 flex-1 rounded-xl border border-line px-3 py-2.5 text-sm outline-none focus:border-moss" /><button type="submit" disabled={!commentText.trim() || commentBusy} className="rounded-xl bg-moss px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40">{commentBusy ? 'Posting…' : 'Post'}</button></> : <Link href="/login" className="w-full rounded-xl bg-moss px-4 py-2.5 text-center text-sm font-semibold text-white">Log in to comment</Link>}
-        </form>
+        <div className="max-h-[65vh] overflow-y-auto px-5 py-4"><CommentsPanel postId={commentReel.post.id} postAuthorId={commentReel.author.id} onCommentAdded={(delta = 1) => { setReels((items) => items.map((item) => item.id === commentReel.id ? { ...item, post: { ...item.post, _count: { ...item.post._count, comments: Math.max(0, (item.post?._count?.comments || 0) + delta) } } } : item)); setCommentReel((value) => value ? { ...value, post: { ...value.post, _count: { ...value.post._count, comments: Math.max(0, (value.post?._count?.comments || 0) + delta) } } } : value); }} /></div>
       </section>
     </div>}
 

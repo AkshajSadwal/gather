@@ -1,4 +1,5 @@
 const prisma = require('../config/prisma');
+const { z } = require('zod');
 const { HttpError, ok } = require('../utils/http');
 const { isBlockedBetween, getBlockedUserIds } = require('../services/blocks');
 
@@ -30,7 +31,7 @@ async function conversations(req, res) {
   });
   const conversationIds = links.map(({ conversation }) => conversation.id);
   const unreadByConversation = await unreadCountsForUser(req.user.id, conversationIds);
-  const data = links.map(({ conversation }) => ({ ...conversation, unreadCount: unreadByConversation[conversation.id] || 0 }));
+  const data = links.map(({ conversation }) => ({ ...conversation, messages: conversation.messages.map((message) => message.deletedAt ? { ...message, body: '' } : message), unreadCount: unreadByConversation[conversation.id] || 0 }));
   return ok(res, { conversations: data });
 }
 
@@ -68,7 +69,23 @@ async function messages(req, res) {
   const rows = await prisma.message.findMany({ where: { conversationId: req.params.id }, orderBy: { createdAt: 'desc' }, take: limit + 1, ...(req.query.cursor ? { cursor: { id: String(req.query.cursor) }, skip: 1 } : {}), include: { sender: { select: { id: true, username: true, image: true } }, reads: true } });
   const hasMore = rows.length > limit;
   if (hasMore) rows.pop();
-  return ok(res, { messages: rows.reverse(), nextCursor: hasMore ? rows[0]?.id : null });
+  return ok(res, { messages: rows.map((message) => message.deletedAt ? { ...message, body: '' } : message).reverse(), nextCursor: hasMore ? rows[0]?.id : null });
+}
+
+async function removeMessage(req, res) {
+  const parsed = z.string().trim().min(1).max(64).safeParse(req.params.messageId);
+  if (!parsed.success) throw new HttpError(400, 'VALIDATION_ERROR', 'The message identifier is invalid.');
+  const message = await prisma.message.findUnique({ where: { id: parsed.data }, select: { id: true, senderId: true, conversationId: true, deletedAt: true } });
+  if (!message) throw new HttpError(404, 'MESSAGE_NOT_FOUND', 'That message could not be found.');
+  if (message.senderId !== req.user.id) throw new HttpError(403, 'FORBIDDEN', 'You can only unsend your own messages.');
+  const deletedAt = message.deletedAt || new Date();
+  if (!message.deletedAt) await prisma.message.update({ where: { id: message.id }, data: { deletedAt } });
+  const io = global.io;
+  if (io) {
+    const participants = await prisma.conversationParticipant.findMany({ where: { conversationId: message.conversationId }, select: { userId: true } });
+    for (const participant of participants) io.to(`user:${participant.userId}`).emit('message:deleted', { conversationId: message.conversationId, messageId: message.id });
+  }
+  return ok(res, { deleted: true, deletedAt });
 }
 
 async function markRead(req, res) {
@@ -86,5 +103,5 @@ async function markRead(req, res) {
   return ok(res, { read: unread.length });
 }
 
-module.exports = { conversations, unread, suggestions, openConversation, messages, markRead };
+module.exports = { conversations, unread, suggestions, openConversation, messages, removeMessage, markRead };
 
