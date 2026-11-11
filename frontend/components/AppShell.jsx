@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut, useSession } from 'next-auth/react';
 import { useEffect, useState } from 'react';
-import { Bell, Check, Compass, House, LogOut, Menu, MessageCircle, Plus, Search, Settings, Sparkles, UserPlus, Video, X } from 'lucide-react';
+import { Bell, Check, Compass, House, LogOut, Menu, MessageCircle, Plus, Search, Settings, ShieldCheck, Sparkles, UserPlus, Video, X } from 'lucide-react';
 import Avatar from './Avatar';
 import Composer from './Composer';
 import { api } from '../lib/api';
@@ -25,9 +25,17 @@ export default function AppShell({ children, right = false }) {
   const [notificationActions, setNotificationActions] = useState({});
   const [mobileMenu, setMobileMenu] = useState(false);
   const [notificationBusy, setNotificationBusy] = useState({});
+  const [isAdmin, setIsAdmin] = useState(false);
   const me = session?.user;
   const { unreadTotal } = useUnreadMessages();
   const { unreadNotifications, markNotificationRead, markAllNotificationsRead } = useUnreadNotifications();
+
+  useEffect(() => {
+    let active = true;
+    if (me) api('/auth/me').then((data) => { if (active) setIsAdmin(Boolean(data.user?.isAdmin)); }).catch(() => { if (active) setIsAdmin(false); });
+    else setIsAdmin(false);
+    return () => { active = false; };
+  }, [me?.id]);
 
   useEffect(() => {
     const listener = () => setCompose(true);
@@ -184,6 +192,7 @@ export default function AppShell({ children, right = false }) {
           <span className="relative"><Bell size={21} strokeWidth={1.8} />{unreadNotifications > 0 && <span aria-label={`${unreadNotifications} unread updates`} className="absolute -right-3 -top-2 min-w-4 rounded-full bg-coral px-1 text-center text-[9px] font-bold leading-4 text-white">{unreadNotifications > 99 ? '99+' : unreadNotifications}</span>}</span>Updates
         </button>
         <button onClick={() => setCompose(true)} className="flex items-center gap-4 rounded-2xl px-4 py-3.5 text-left text-[15px] text-ink/75 transition hover:bg-white"><Plus size={21} />Create</button>
+        {isAdmin && <Link href="/admin/reports" className="flex items-center gap-4 rounded-2xl px-4 py-3.5 text-[15px] text-ink/75 transition hover:bg-white"><ShieldCheck size={21} />Reports</Link>}
         <Link href={me?.username ? `/profile/${me.username}` : '/login'} className={`flex items-center gap-3 rounded-2xl px-4 py-3.5 text-[15px] transition hover:bg-white ${pathname.startsWith('/profile') ? 'bg-white font-semibold' : 'text-ink/75'}`}><Avatar src={me?.image} name={me?.name || me?.email} size="xs" /><span>Profile</span></Link>
       </nav>
       <div className="mt-auto grid gap-2">

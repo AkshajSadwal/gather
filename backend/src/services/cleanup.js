@@ -38,7 +38,9 @@ async function runCleanup() {
     result.notifications = deleted.count;
   } catch { result.failures += 1; }
 
-  console.log(`[cleanup] stories=${result.stories} temp=${result.tempFiles} notifications=${result.notifications} failures=${result.failures}`);
+  if (result.stories || result.tempFiles || result.notifications || result.failures) {
+    console.log(`[cleanup] stories=${result.stories} temp=${result.tempFiles} notifications=${result.notifications} failures=${result.failures}`);
+  }
 }
 
 function startCleanup() {

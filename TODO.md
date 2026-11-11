@@ -2,7 +2,7 @@
 
 ## Remaining product and deployment work
 
-- Build moderator tooling for reviewing reports and handling repeat offenders.
+- Extend moderator tooling with repeat-offender handling, bulk triage, and audit history.
 - Add an S3-compatible storage adapter for production object storage.
 - Add email verification and account recovery.
 - Configure TURN for restrictive NAT/firewall paths.

@@ -79,6 +79,10 @@ New browser media URLs go through `GET /api/media?key=...`; the backend authenti
 
 `services/cleanup.js` periodically removes stories expired for more than one hour and their media, temporary upload files older than one hour, and read notifications older than 90 days. `CLEANUP_INTERVAL_MS` defaults to 30 minutes; the timer is unreferenced, skipped in tests, and cleared during shutdown.
 
+Admin access is configured by normalized usernames in `ADMIN_USERNAMES`. The admin report queue records review status, reviewer, and review time; post deletion shares the same media cleanup helper as owner deletion. Hashtag pages and popular Explore queries filter private, blocked, and muted authors before returning posts.
+
+Sessions are checked against a 30-second in-process user-existence cache shared by HTTP and Socket.IO authentication. Password changes record `passwordChangedAt`; sessions without a newer `authAt` are rejected, and account deletion/password changes invalidate the local cache entry immediately.
+
 ## Security layers
 
 - request validation with Zod

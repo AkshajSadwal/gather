@@ -3,6 +3,7 @@ const { z } = require('zod');
 const prisma = require('../config/prisma');
 const { HttpError, ok } = require('../utils/http');
 const { removeLocal } = require('../services/storage');
+const { invalidateSessionUserCache } = require('../middleware/auth');
 
 const passwordSchema = z.string().min(8).max(72);
 
@@ -14,8 +15,9 @@ async function changePassword(req, res) {
   if (!user?.passwordHash) throw new HttpError(400, 'PASSWORD_NOT_CONFIGURED', 'This account uses Google sign-in and does not have a password.');
   if (!await bcrypt.compare(parsed.data.currentPassword, user.passwordHash)) throw new HttpError(401, 'INVALID_CURRENT_PASSWORD', 'Your current password is incorrect.');
   const passwordHash = await bcrypt.hash(parsed.data.newPassword, 12);
-  await prisma.user.update({ where: { id: req.user.id }, data: { passwordHash } });
-  return ok(res, { changed: true });
+  await prisma.user.update({ where: { id: req.user.id }, data: { passwordHash, passwordChangedAt: new Date() } });
+  invalidateSessionUserCache(req.user.id);
+  return ok(res, { changed: true, reauthRequired: true });
 }
 
 async function deleteAccount(req, res) {
@@ -36,6 +38,7 @@ async function deleteAccount(req, res) {
   ]);
   const media = new Set([user.image, user.profile?.avatarUrl, ...posts.map((item) => item.url), ...reels.map((item) => item.url), ...stories.map((item) => item.url)].filter(Boolean));
   await prisma.user.delete({ where: { id: user.id } });
+  invalidateSessionUserCache(user.id);
   await Promise.all([...media].map((reference) => removeLocal(reference).catch(() => {})));
   global.io?.in(`user:${user.id}`).disconnectSockets(true);
   return ok(res, { deleted: true });

@@ -11,13 +11,12 @@ JSON success responses use `{ "data": ... }`; failures use `{ "error": { "code":
 | GET | `/health` | API + PostgreSQL health |
 | POST | `/api/auth/signup` | Register a credential account |
 | POST | `/api/auth/login` | Validate credentials for Auth.js |
-| POST | `/api/auth/change-password` | Change credential password (`{ currentPassword, newPassword }`); Google-only accounts receive `PASSWORD_NOT_CONFIGURED` |
-| GET | `/api/auth/me` | Current account and accepted social counts |
+| POST | `/api/auth/change-password` | Change credential password (`{ currentPassword, newPassword }`); returns `reauthRequired: true`; Google-only accounts receive `PASSWORD_NOT_CONFIGURED` |
+| GET | `/api/auth/me` | Current account, accepted social counts, and `isAdmin` |
 | POST | `/api/auth/google-sync` | Internal Google account upsert |
 | GET | `/api/users/check-username?username=` | Rate-limited username availability |
 | GET | `/api/users/check-email?email=` | Rate-limited email availability |
 | GET/PATCH | `/api/users/:username` / `/api/users/me/profile` | Read profile / update only current user |
-| DELETE | `/api/users/me` | Permanently delete the current account and its media |
 | DELETE | `/api/users/me` | Permanently delete the current account and its media |
 | POST | `/api/users/me/avatar` | Upload only current user's avatar |
 | GET | `/api/blocks` | Accounts the current user has blocked (newest first, max 200); never lists who blocked you |
@@ -25,12 +24,15 @@ JSON success responses use `{ "data": ... }`; failures use `{ "error": { "code":
 | GET | `/api/mutes` | List accounts muted by the current user (max 200, newest first) |
 | POST | `/api/mutes/:username/toggle` | Mute/unmute another account; mute hides their feed posts, reels, and stories |
 | POST | `/api/reports` | Report a visible post, comment, or account (`{ targetType, targetId, reason, details? }`); limited to 10/hour/account |
+| GET | `/api/admin/reports?status=&cursor=&limit=` | Admin-only report queue with safe target previews and cursor pagination |
+| PATCH | `/api/admin/reports/:id` | Admin-only `{ status: "REVIEWED"|"DISMISSED", removeContent? }`; records reviewer/time and can remove post/comment content |
 | GET | `/api/users/:username/followers` | Accepted followers, subject to privacy/block checks |
 | GET | `/api/users/:username/following` | Accepted following, subject to privacy/block checks |
 | POST | `/api/follows/:username/toggle` | Follow, request, cancel, or unfollow |
 | GET/PATCH | `/api/follows/requests[/:id]` | Incoming private-account requests |
-| GET | `/api/posts/feed` | Cursor-paginated feed excluding blocked authors |
-| GET | `/api/posts/explore` | Public explore feed excluding blocked authors |
+| GET | `/api/posts/feed` | Cursor-paginated feed excluding blocked and muted authors |
+| GET | `/api/posts/explore` | Latest public explore feed; `sort=popular&page=1..10` ranks public posts from the last 7 days by likes (12/page) |
+| GET | `/api/tags/:tag?cursor=&limit=` | Cursor-paginated posts with a hashtag; only public posts, excluding blocked and muted authors |
 | GET | `/api/posts/saved?cursor=&limit=` | Current user's visible saved posts, newest saved first |
 | POST | `/api/posts` | Create media post |
 | GET/PATCH/DELETE | `/api/posts/:id` | Read visible post / edit own caption / delete own post |
@@ -38,7 +40,7 @@ JSON success responses use `{ "data": ... }`; failures use `{ "error": { "code":
 | POST | `/api/posts/:id/bookmark` | Toggle bookmark |
 | GET/POST | `/api/posts/:id/comments` | Cursor-paginated top-level comments / create a comment or one-level reply (`{ body, parentId? }`) |
 | GET | `/api/comments/:commentId/replies` | Cursor-paginated replies for a top-level comment |
-| DELETE | `/api/comments/:commentId` | Delete own comment |
+| DELETE | `/api/comments/:commentId` | Delete own comment or any comment on a post you own |
 | GET | `/api/search?q=` | Search users/hashtags/public captions, excluding blocked accounts where applicable |
 | GET | `/api/notifications` | Notification list |
 | GET | `/api/notifications/unread` | Current user's unread notification total |
@@ -67,11 +69,15 @@ JSON success responses use `{ "data": ... }`; failures use `{ "error": { "code":
 
 Credential passwords must be 8–72 characters and no more than 72 UTF-8 bytes. `DELETE /api/users/me` accepts `{ confirmUsername, password? }`; password is required for credential accounts. It cascades account records, removes owned media best-effort, and disconnects the account's sockets.
 
-Comments are returned newest first with `nextCursor`; each top-level comment includes `_count.replies`. Replies are limited to one level and must reference a top-level comment on the same post. Reply, comment, and mention notifications are deduplicated by recipient for each new comment; self and blocked recipients are skipped.
+Comments are returned newest first with `nextCursor`; each top-level comment includes `_count.replies` after blocked authors are filtered. Replies are limited to one level and must reference a top-level comment on the same post. Reply, comment, and mention notifications are deduplicated by recipient for each new comment; self and blocked recipients are skipped.
 
 `PATCH /api/posts/:id` accepts `{ "caption": "..." }` up to 2200 characters and is owner-only. It replaces hashtag links, notifies only newly mentioned accounts, and syncs the linked reel caption. Saved-post pagination uses bookmark IDs as cursors and excludes posts that are no longer visible.
 
-There is no admin endpoint or UI yet; reports are reviewed directly in the database (`Report.status`: `OPEN`, `REVIEWING`, `RESOLVED`, `DISMISSED`).
+Reports use `OPEN`, `REVIEWED`, and `DISMISSED`. `GET /api/admin/reports` and `PATCH /api/admin/reports/:id` require a username listed in comma-separated `ADMIN_USERNAMES` (case-insensitive); an empty value grants no admin access. Admin previews do not expose reporter identity fields beyond the reporting username. The legacy `/uploads/*` media gate permits admin preview only for media attached to a post that currently has an `OPEN` report.
+
+Credential sign-in sessions include an `authAt` timestamp in the signed Auth.js JWT. After `passwordChangedAt` is set, requests and socket handshakes reject sessions with a missing or earlier `authAt`; password change returns `{ changed: true, reauthRequired: true }`.
+
+Hashtag pages and popular Explore results respect public-account visibility and hide posts by accounts the viewer blocked or muted. Suggestion results include `mutualFollowers` and rank by mutual follows.
 
 ## Request limits
 
@@ -79,6 +85,7 @@ There is no admin endpoint or UI yet; reports are reviewed directly in the datab
 - Avatar, post, story, and reel uploads are limited to 10 per hour per account and 30 per hour per client IP. These checks run before multipart files are written to temporary storage.
 - Socket.IO message sends are limited to 60 per minute per account.
 - Search and username/email availability checks are limited to 60 requests per minute; notification read actions are limited to 30 per minute. Authenticated requests key limits by account, otherwise by IP. Authenticated writes and deletes use the existing 50-per-minute limit.
+- Admin report listing and review use the existing read/write limits; admin access is checked separately on every request.
 
 Upload limit responses use HTTP `429` with the standard `{ "error": { "code": "RATE_LIMITED", "message": "..." } }` envelope. Limits use the backend's in-memory rate-limit store and therefore apply per backend process.
 

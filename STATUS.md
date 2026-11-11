@@ -47,8 +47,7 @@ Backend syntax checks, frontend lint, and Prisma schema validation pass. Postgre
 - TURN is not configured by default.
 - Presence and live call rooms are single-process in memory.
 - Legacy local media migration to MinIO, lifecycle policies for orphaned object-storage keys, and production-grade media processing/CDN remain follow-up work.
-- Reports have no moderator UI or review endpoints yet (review via the database), no reporter notifications, and no automated action on reported content.
-- Comments, stories, reels and direct messages cannot be reported individually yet; report the account or the post instead.
+- Stories, reels, and direct messages cannot be reported individually yet; posts, comments, and accounts can be reported.
 
 ## Latest infrastructure pass (2026-10-04)
 
@@ -62,3 +61,10 @@ Backend syntax checks, frontend lint, and Prisma schema validation pass. Postgre
 
 - Added account/IP request limits, unread notification links and count, comment owner deletion, block/mute controls, visible-target reporting, paginated replies, saved posts, editable captions, message unsend, account management, and scheduled cleanup.
 - Added schema migration `20261112000000_blocks_reports_replies` and compact feature integration coverage. Prisma validate and workspace lint passed; PostgreSQL integration and E2E tests were not run.
+
+## Round 2 feature pass (2026-11-12)
+
+- Added password-change session revocation and migration `20261113000000_password_changed_and_report_review` with report reviewer metadata.
+- Added an admin report queue configured by `ADMIN_USERNAMES`, including status updates and optional post/comment removal with media cleanup.
+- Added public hashtag pages, the popular-this-week Explore tab, mutual-follower-ranked suggestions, blocked-comment filtering, 30-second session existence caching, and deleted-message unread count fixes.
+- Backend and frontend lint plus Prisma validation passed. Integration tests were added but not run; a local database, Prisma client generation, and migrations are still required.

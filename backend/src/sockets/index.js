@@ -63,6 +63,7 @@ function createSocketServer(server, frontendUrl, database = prisma) {
             where: {
               conversationId,
               senderId: { not: recipientId },
+              deletedAt: null,
               reads: { none: { userId: recipientId } }
             }
           });

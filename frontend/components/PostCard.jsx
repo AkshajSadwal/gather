@@ -70,5 +70,5 @@ export default function PostCard({ initialPost, onDelete }) {
 }
 
 function Caption({ text }) {
-  return text.split(/(#[\p{L}\p{N}_]+|@[a-zA-Z0-9._]+)/gu).map((part, index) => part.startsWith('#') || part.startsWith('@') ? <Link key={`${part}-${index}`} href={part.startsWith('#') ? `/search?q=${encodeURIComponent(part.slice(1))}` : `/profile/${part.slice(1)}`} className="text-moss hover:underline">{part}</Link> : part);
+  return text.split(/(#[\p{L}\p{N}_]+|@[a-zA-Z0-9._]+)/gu).map((part, index) => part.startsWith('#') || part.startsWith('@') ? <Link key={`${part}-${index}`} href={part.startsWith('#') ? `/tags/${encodeURIComponent(part.slice(1))}` : `/profile/${part.slice(1)}`} className="text-moss hover:underline">{part}</Link> : part);
 }

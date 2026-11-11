@@ -10,6 +10,7 @@ async function unreadCountsForUser(userId, conversationIds) {
     where: {
       conversationId: { in: conversationIds },
       senderId: { not: userId },
+      deletedAt: null,
       reads: { none: { userId } }
     },
     _count: { _all: true }
@@ -46,7 +47,8 @@ async function suggestions(req, res) {
   const follows = req.user?.id ? await prisma.follow.findMany({ where: { followerId: req.user.id }, select: { followedId: true } }) : [];
   const excluded = [...(req.user?.id ? [req.user.id] : []), ...follows.map((row) => row.followedId)];
   const blockedIds = await getBlockedUserIds(req.user?.id);
-  const users = await prisma.user.findMany({ where: { id: { notIn: [...excluded, ...blockedIds] }, profile: { is: { visibility: 'PUBLIC' } } }, take: 8, orderBy: { createdAt: 'desc' }, select: { id: true, username: true, image: true, profile: { select: { displayName: true, avatarUrl: true } }, _count: { select: { followers: { where: { accepted: true } } } } } });
+  const candidates = await prisma.user.findMany({ where: { id: { notIn: [...excluded, ...blockedIds] }, profile: { is: { visibility: 'PUBLIC' } } }, take: 50, orderBy: { createdAt: 'desc' }, select: { id: true, username: true, image: true, profile: { select: { displayName: true, avatarUrl: true } }, followers: { where: { accepted: true, followerId: { in: follows.map((row) => row.followedId) } }, select: { id: true } }, _count: { select: { followers: { where: { accepted: true } } } } } });
+  const users = candidates.map(({ followers, ...user }) => ({ ...user, mutualFollowers: followers.length })).sort((a, b) => b.mutualFollowers - a.mutualFollowers || b._count.followers - a._count.followers).slice(0, 8);
   return ok(res, { users });
 }
 

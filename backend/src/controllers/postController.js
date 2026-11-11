@@ -4,7 +4,7 @@ const { HttpError, ok } = require('../utils/http');
 const { persistUpload, removeLocal } = require('../services/storage');
 const { createNotification } = require('../services/notifications');
 const { getBlockState, isBlockedBetween, getBlockedUserIds } = require('../services/blocks');
-const { mutedIdsFor } = require('../services/relations');
+const { blockedIdsFor } = require('../services/relations');
 
 const postInclude = (userId) => ({
   author: { select: { id: true, username: true, image: true, profile: { select: { displayName: true, avatarUrl: true } } } },
@@ -67,6 +67,18 @@ async function feed(req, res) {
 }
 
 async function explore(req, res) {
+  if (req.query.sort === 'popular') {
+    const parsed = z.object({ page: z.coerce.number().int().min(1).max(10).default(1) }).safeParse(req.query);
+    if (!parsed.success) throw new HttpError(400, 'VALIDATION_ERROR', 'Choose a popular page from 1 to 10.');
+    const blockedIds = await getBlockedUserIds(req.user?.id);
+    const hiddenIds = [...new Set([...blockedIds, ...await mutedIdsFor(req.user?.id)])];
+    const where = { createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }, authorId: { notIn: hiddenIds }, author: { is: { profile: { is: { visibility: 'PUBLIC' } } } } };
+    const [posts, total] = await Promise.all([
+      prisma.post.findMany({ where, orderBy: [{ likes: { _count: 'desc' } }, { id: 'desc' }], skip: (parsed.data.page - 1) * 12, take: 12, include: postInclude(req.user?.id || '__visitor__') }),
+      prisma.post.count({ where })
+    ]);
+    return ok(res, { posts: posts.map(shapePost), page: parsed.data.page, totalPages: Math.max(1, Math.min(10, Math.ceil(total / 12))) });
+  }
   const limit = Math.min(Math.max(Number(req.query.limit) || 12, 1), 30);
   const blockedIds = await getBlockedUserIds(req.user?.id);
   const hiddenIds = [...new Set([...blockedIds, ...await mutedIdsFor(req.user?.id)])];
@@ -127,12 +139,19 @@ async function detail(req, res) {
 }
 
 async function remove(req, res) {
-  const post = await prisma.post.findUnique({ where: { id: req.params.id }, select: { id: true, authorId: true, media: { select: { url: true } }, reel: { include: { media: { select: { url: true } } } } } });
+  const post = await prisma.post.findUnique({ where: { id: req.params.id }, select: { id: true, authorId: true } });
   if (!post) throw new HttpError(404, 'POST_NOT_FOUND', 'That post could not be found.');
   if (post.authorId !== req.user.id) throw new HttpError(403, 'FORBIDDEN', 'You can only delete your own posts.');
+  await deletePostContent(post.id);
+  return ok(res, { deleted: true });
+}
+
+async function deletePostContent(postId) {
+  const post = await prisma.post.findUnique({ where: { id: postId }, select: { id: true, media: { select: { url: true } }, reel: { include: { media: { select: { url: true } } } } } });
+  if (!post) return false;
   await prisma.post.delete({ where: { id: post.id } });
   await Promise.all([...post.media.map((item) => item.url), ...(post.reel?.media.map((item) => item.url) || [])].map((url) => removeLocal(url).catch(() => {})));
-  return ok(res, { deleted: true });
+  return true;
 }
 
 async function saved(req, res) {
@@ -219,15 +238,16 @@ async function listComments(req, res) {
   const post = await prisma.post.findUnique({ where: { id: req.params.id }, select: { id: true, authorId: true } });
   if (!post) throw new HttpError(404, 'POST_NOT_FOUND', 'That post could not be found.');
   await assertPostVisible(post, req.user?.id);
+  const blockedIds = await blockedIdsFor(req.user?.id);
   const parsed = z.object({ cursor: z.string().trim().min(1).max(64).optional(), limit: z.coerce.number().int().min(1).max(50).default(20) }).safeParse(req.query);
   if (!parsed.success) throw new HttpError(400, 'VALIDATION_ERROR', 'The comment page is invalid.');
-  const cursor = parsed.data.cursor ? await prisma.comment.findFirst({ where: { id: parsed.data.cursor, postId: post.id, parentId: null }, select: { id: true } }) : null;
+  const cursor = parsed.data.cursor ? await prisma.comment.findFirst({ where: { id: parsed.data.cursor, postId: post.id, parentId: null, userId: { notIn: blockedIds } }, select: { id: true } }) : null;
   const rows = await prisma.comment.findMany({
-    where: { postId: post.id, parentId: null },
+    where: { postId: post.id, parentId: null, userId: { notIn: blockedIds } },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: parsed.data.limit + 1,
     ...(cursor ? { cursor: { id: cursor.id }, skip: 1 } : {}),
-    include: { user: { select: { id: true, username: true, image: true } }, _count: { select: { replies: true } } }
+    include: { user: { select: { id: true, username: true, image: true } }, _count: { select: { replies: { where: { userId: { notIn: blockedIds } } } } } }
   });
   const hasMore = rows.length > parsed.data.limit;
   if (hasMore) rows.pop();
@@ -238,11 +258,12 @@ async function listReplies(req, res) {
   const parent = await prisma.comment.findUnique({ where: { id: req.params.commentId }, select: { id: true, postId: true, parentId: true, post: { select: { id: true, authorId: true } } } });
   if (!parent || parent.parentId) throw new HttpError(404, 'COMMENT_NOT_FOUND', 'That comment could not be found.');
   await assertPostVisible(parent.post, req.user?.id);
+  const blockedIds = await blockedIdsFor(req.user?.id);
   const parsed = z.object({ cursor: z.string().trim().min(1).max(64).optional(), limit: z.coerce.number().int().min(1).max(50).default(20) }).safeParse(req.query);
   if (!parsed.success) throw new HttpError(400, 'VALIDATION_ERROR', 'The replies page is invalid.');
-  const cursor = parsed.data.cursor ? await prisma.comment.findFirst({ where: { id: parsed.data.cursor, parentId: parent.id }, select: { id: true } }) : null;
+  const cursor = parsed.data.cursor ? await prisma.comment.findFirst({ where: { id: parsed.data.cursor, parentId: parent.id, userId: { notIn: blockedIds } }, select: { id: true } }) : null;
   const rows = await prisma.comment.findMany({
-    where: { parentId: parent.id }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: parsed.data.limit + 1,
+    where: { parentId: parent.id, userId: { notIn: blockedIds } }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: parsed.data.limit + 1,
     ...(cursor ? { cursor: { id: cursor.id }, skip: 1 } : {}),
     include: { user: { select: { id: true, username: true, image: true } } }
   });
@@ -284,4 +305,4 @@ async function deleteComment(req, res) {
   return ok(res, { deleted: true });
 }
 
-module.exports = { feed, explore, create, detail, remove, saved, updateCaption, toggleLike, toggleBookmark, listComments, listReplies, createComment, deleteComment, assertPostVisible };
+module.exports = { feed, explore, create, detail, remove, deletePostContent, saved, updateCaption, toggleLike, toggleBookmark, listComments, listReplies, createComment, deleteComment, assertPostVisible };

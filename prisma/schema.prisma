@@ -63,6 +63,7 @@ model User {
   username            String   @unique @db.VarChar(30)
   email               String   @unique @db.VarChar(254)
   passwordHash        String?
+  passwordChangedAt   DateTime?
   emailVerified       DateTime?
   image               String?
   createdAt           DateTime @default(now())
@@ -88,6 +89,7 @@ model User {
   mutesCreated       Mute[] @relation("muter")
   mutesReceived      Mute[] @relation("muted")
   reportsFiled       Report[] @relation("reportFiled")
+  reportsReviewed    Report[] @relation("reportReviewed")
 }
 
 
@@ -124,9 +126,13 @@ model Report {
   details    String?          @db.VarChar(500)
   status     ReportStatus     @default(OPEN)
   createdAt  DateTime         @default(now())
+  reviewedById String?
+  reviewedAt DateTime?
   reporter   User             @relation("reportFiled", fields: [reporterId], references: [id], onDelete: Cascade)
+  reviewedBy User?            @relation("reportReviewed", fields: [reviewedById], references: [id], onDelete: SetNull)
   @@unique([reporterId, targetType, targetId])
   @@index([status, createdAt])
+  @@index([reviewedById])
 }
 
 model Profile {

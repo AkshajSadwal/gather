@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
 const { z } = require('zod');
 const prisma = require('../config/prisma');
+const { isAdminUsername } = require('../middleware/admin');
 const { normalizeUsername, normalizeEmail, validUsername } = require('../utils/normalize');
 const { HttpError, ok } = require('../utils/http');
 const crypto = require('node:crypto');
@@ -95,7 +96,7 @@ async function me(req, res) {
   });
   if (!user) throw new HttpError(401, 'SESSION_EXPIRED', 'Your account is no longer available. Please sign in again.');
   const { passwordHash, ...safeUser } = user;
-  return ok(res, { user: { ...safeUser, hasPassword: Boolean(passwordHash) } });
+  return ok(res, { user: { ...safeUser, hasPassword: Boolean(passwordHash), isAdmin: isAdminUsername(user.username) } });
 }
 
 module.exports = { checkUsername, checkEmail, signup, login, syncGoogle, me };

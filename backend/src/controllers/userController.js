@@ -61,7 +61,7 @@ async function updateAvatar(req, res) {
   }
   const media = await persistUpload(req.file, 'avatars');
   if (media.type !== 'IMAGE') throw new HttpError(400, 'IMAGE_REQUIRED', 'Profile photos must be images.');
-  const current = await prisma.user.findUnique({ where: { id: req.user.id }, select: { image: true } });
+  const current = await prisma.user.findUnique({ where: { id: req.user.id }, select: { image: true, profile: { select: { avatarUrl: true } } } });
   let profile;
   try {
     profile = await prisma.$transaction(async (tx) => {
@@ -70,7 +70,8 @@ async function updateAvatar(req, res) {
       return updated;
     });
   } catch (error) { await removeLocal(media.url).catch(() => {}); throw error; }
-  if (current?.image?.startsWith('/uploads/')) await removeLocal(current.image).catch(() => {});
+  const previousAvatars = new Set([current?.image, current?.profile?.avatarUrl].filter((url) => typeof url === 'string' && (url.startsWith('/uploads/') || url.startsWith('s3://'))));
+  await Promise.all([...previousAvatars].filter((url) => url !== media.url).map((url) => removeLocal(url).catch(() => {})));
   return ok(res, { profile, image: media.url });
 }
 

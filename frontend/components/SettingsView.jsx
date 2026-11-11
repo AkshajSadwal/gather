@@ -38,7 +38,7 @@ export default function SettingsView() {
 
   const unmute = async (entry) => { if (unmuting) return; setUnmuting(entry.id); try { await api(`/mutes/${encodeURIComponent(entry.muted.username)}/toggle`, { method: 'POST' }); setMuted((all) => all.filter((item) => item.id !== entry.id)); notify(`@${entry.muted.username} has been unmuted.`); } catch (error) { notify(error.message, 'error'); } finally { setUnmuting(''); } };
 
-  const changePassword = async (event) => { event.preventDefault(); setAccountBusy(true); try { await api('/auth/change-password', { method: 'POST', body: JSON.stringify(passwordForm) }); setPasswordForm({ currentPassword: '', newPassword: '' }); notify('Password changed.'); } catch (error) { notify(error.message, 'error'); } finally { setAccountBusy(false); } };
+  const changePassword = async (event) => { event.preventDefault(); setAccountBusy(true); try { await api('/auth/change-password', { method: 'POST', body: JSON.stringify(passwordForm) }); setPasswordForm({ currentPassword: '', newPassword: '' }); notify('Password changed. Please sign in again.'); await signOut({ callbackUrl: '/login?passwordChanged=1' }); } catch (error) { notify(error.message, 'error'); setAccountBusy(false); } };
   const deleteAccount = async (event) => { event.preventDefault(); if (deleteConfirm !== me.username) return; setDeleting(true); try { await api('/users/me', { method: 'DELETE', body: JSON.stringify({ confirmUsername: deleteConfirm, ...(me.hasPassword ? { password: deletePassword } : {}) }) }); await signOut({ callbackUrl: '/login' }); } catch (error) { notify(error.message, 'error'); setDeleting(false); } };
 
   if (busy) return <div className="mx-auto max-w-3xl"><div className="skeleton h-[480px] rounded-3xl" /></div>;
