@@ -26,6 +26,7 @@ JSON success responses use `{ "data": ... }`; failures use `{ "error": { "code":
 | POST | `/api/reports` | Report a visible post, comment, or account (`{ targetType, targetId, reason, details? }`); limited to 10/hour/account |
 | GET | `/api/admin/reports?status=&cursor=&limit=` | Admin-only report queue with safe target previews and cursor pagination |
 | PATCH | `/api/admin/reports/:id` | Admin-only `{ status: "REVIEWED"|"DISMISSED", removeContent? }`; records reviewer/time and can remove post/comment content |
+| GET | `/api/admin/moderation-history?reportId=&cursor=&limit=` | Admin-only paginated moderation audit history; optional filter by report ID |
 | GET | `/api/users/:username/followers` | Accepted followers, subject to privacy/block checks |
 | GET | `/api/users/:username/following` | Accepted following, subject to privacy/block checks |
 | POST | `/api/follows/:username/toggle` | Follow, request, cancel, or unfollow |
@@ -74,6 +75,8 @@ Comments are returned newest first with `nextCursor`; each top-level comment inc
 `PATCH /api/posts/:id` accepts `{ "caption": "..." }` up to 2200 characters and is owner-only. It replaces hashtag links, notifies only newly mentioned accounts, and syncs the linked reel caption. Saved-post pagination uses bookmark IDs as cursors and excludes posts that are no longer visible.
 
 Reports use `OPEN`, `REVIEWED`, and `DISMISSED`. `GET /api/admin/reports` and `PATCH /api/admin/reports/:id` require a username listed in comma-separated `ADMIN_USERNAMES` (case-insensitive); an empty value grants no admin access. Admin previews do not expose reporter identity fields beyond the reporting username. The legacy `/uploads/*` media gate permits admin preview only for media attached to a post that currently has an `OPEN` report.
+
+Every admin review creates a `REPORT_REVIEWED` audit row with moderator, report/target snapshots, previous status, new status, and timestamp. If the same decision removes a post or comment, a second `CONTENT_REMOVED` row records that action. Audit rows survive deletion of their report or moderator account using stored report and username snapshots. The history endpoint uses the standard read limit and only admins can access it.
 
 Credential sign-in sessions include an `authAt` timestamp in the signed Auth.js JWT. After `passwordChangedAt` is set, requests and socket handshakes reject sessions with a missing or earlier `authAt`; password change returns `{ changed: true, reauthRequired: true }`.
 

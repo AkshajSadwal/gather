@@ -135,3 +135,45 @@ test('Round 2 privacy, session revocation, moderation, and hashtag visibility', 
     await prisma.$disconnect();
   }
 });
+
+test('admin report review is recorded in moderation history', async (t) => {
+  if (!process.env.DATABASE_URL) { t.skip('DATABASE_URL is not set; this integration test needs a disposable local database.'); return; }
+  await prisma.$connect();
+  const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+  const userIds = [];
+  const reportIds = [];
+  const previousAdmins = process.env.ADMIN_USERNAMES;
+  const createUser = async (prefix) => {
+    const username = `${prefix}_${suffix}`.slice(0, 30);
+    const user = await prisma.user.create({ data: { username, email: `${username}@example.test`, profile: { create: { visibility: 'PUBLIC' } } } });
+    userIds.push(user.id);
+    return user;
+  };
+  const cookieFor = async (user) => {
+    const name = 'authjs.session-token';
+    const token = await encode({ token: { sub: user.id, username: user.username }, secret: process.env.AUTH_SECRET, salt: name, maxAge: 3600 });
+    return `${name}=${encodeURIComponent(token)}`;
+  };
+  try {
+    const reporter = await createUser('audit_reporter');
+    const target = await createUser('audit_target');
+    const moderator = await createUser('audit_mod');
+    const report = await prisma.report.create({ data: { reporterId: reporter.id, targetType: 'USER', targetId: target.id, reason: 'SPAM' } });
+    reportIds.push(report.id);
+    process.env.ADMIN_USERNAMES = moderator.username;
+    const response = await request(app).patch(`/api/admin/reports/${report.id}`).set('Cookie', await cookieFor(moderator)).send({ status: 'REVIEWED' });
+    assert.equal(response.status, 200);
+    const history = await request(app).get(`/api/admin/moderation-history?reportId=${report.id}`).set('Cookie', await cookieFor(moderator));
+    assert.equal(history.status, 200);
+    assert.equal(history.body.data.items.length, 1);
+    assert.equal(history.body.data.items[0].action, 'REPORT_REVIEWED');
+    assert.equal(history.body.data.items[0].moderatorUsername, moderator.username);
+    assert.equal(history.body.data.items[0].previousStatus, 'OPEN');
+    assert.equal(history.body.data.items[0].newStatus, 'REVIEWED');
+  } finally {
+    if (previousAdmins === undefined) delete process.env.ADMIN_USERNAMES; else process.env.ADMIN_USERNAMES = previousAdmins;
+    await prisma.moderationAction.deleteMany({ where: { reportRef: { in: reportIds } } });
+    await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+    await prisma.$disconnect();
+  }
+});

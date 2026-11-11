@@ -68,3 +68,8 @@ Backend syntax checks, frontend lint, and Prisma schema validation pass. Postgre
 - Added an admin report queue configured by `ADMIN_USERNAMES`, including status updates and optional post/comment removal with media cleanup.
 - Added public hashtag pages, the popular-this-week Explore tab, mutual-follower-ranked suggestions, blocked-comment filtering, 30-second session existence caching, and deleted-message unread count fixes.
 - Backend and frontend lint plus Prisma validation passed. Integration tests were added but not run; a local database, Prisma client generation, and migrations are still required.
+
+## Moderation audit history
+
+- Added transactional audit records for report decisions and post/comment removal, with moderator and report snapshots that remain after related records are deleted.
+- Added the admin-only paginated moderation-history endpoint and responsive history page. Prisma validation, backend lint, frontend lint, and targeted Node syntax checks passed; the database integration test was added but not run.

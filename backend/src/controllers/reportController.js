@@ -4,7 +4,7 @@ const { HttpError, ok } = require('../utils/http');
 const { reportSchema } = require('../utils/reportSchema');
 const { assertPostVisible } = require('./postController');
 const { isBlockedBetween } = require('../services/relations');
-const { deletePostContent } = require('./postController');
+const { reviewReport, listModerationHistory } = require('../services/moderationService');
 
 async function create(req, res) {
   const parsed = reportSchema.safeParse(req.body);
@@ -71,15 +71,17 @@ async function listForAdmin(req, res) {
 async function review(req, res) {
   const parsed = z.object({ status: z.enum(['REVIEWED', 'DISMISSED']), removeContent: z.boolean().default(false) }).strict().safeParse(req.body);
   if (!parsed.success) throw new HttpError(400, 'VALIDATION_ERROR', 'Choose a valid review action.');
-  const report = await prisma.report.findUnique({ where: { id: req.params.id }, select: { id: true, targetType: true, targetId: true } });
-  if (!report) throw new HttpError(404, 'REPORT_NOT_FOUND', 'That report could not be found.');
-  if (parsed.data.removeContent) {
-    if (report.targetType === 'POST') await deletePostContent(report.targetId);
-    else if (report.targetType === 'COMMENT') await prisma.comment.deleteMany({ where: { id: report.targetId } });
-    else throw new HttpError(400, 'UNSUPPORTED_CONTENT_REMOVAL', 'User accounts cannot be removed from this review action.');
-  }
-  const updated = await prisma.report.update({ where: { id: report.id }, data: { status: parsed.data.status, reviewedById: req.user.id, reviewedAt: new Date() }, select: { id: true, status: true, reviewedAt: true } });
+  const id = z.string().trim().min(1).max(64).safeParse(req.params.id);
+  if (!id.success) throw new HttpError(400, 'VALIDATION_ERROR', 'Choose a valid report.');
+  const updated = await reviewReport({ reportId: id.data, moderatorId: req.user.id, moderatorUsername: req.user.username, status: parsed.data.status, removeContent: parsed.data.removeContent });
   return ok(res, { report: updated });
 }
 
-module.exports = { create, listForAdmin, review };
+async function moderationHistory(req, res) {
+  const parsed = z.object({ reportId: z.string().trim().min(1).max(64).optional(), cursor: z.string().trim().min(1).max(64).optional(), limit: z.coerce.number().int().min(1).max(50).default(25) }).safeParse(req.query);
+  if (!parsed.success) throw new HttpError(400, 'VALIDATION_ERROR', 'Choose a valid moderation history page.');
+  const result = await listModerationHistory(parsed.data);
+  return ok(res, result);
+}
+
+module.exports = { create, listForAdmin, review, moderationHistory };

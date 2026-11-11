@@ -73,6 +73,7 @@ router.get('/search', maybeAuth, searchLimiter, route(users.search));
 router.post('/reports', requireAuth, reportLimiter, route(reports.create));
 router.get('/admin/reports', requireAuth, requireAdmin, readLimiter, route(reports.listForAdmin));
 router.patch('/admin/reports/:id', requireAuth, requireAdmin, writeLimiter, route(reports.review));
+router.get('/admin/moderation-history', requireAuth, requireAdmin, readLimiter, route(reports.moderationHistory));
 router.get('/media', route(media.serve));
 
 router.get('/posts/feed', requireAuth, route(posts.feed));

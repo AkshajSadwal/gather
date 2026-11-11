@@ -21,7 +21,7 @@ The `Block` model establishes a server-side interaction boundary. Creating a blo
 
 ## Reports
 
-`POST /api/reports` requires a session and is rate-limited (20/hour). Reporter identity always comes from `req.user.id`, never the payload. Post reports run the same visibility/block check as reading the post, so a report cannot be used to confirm the existence or content of a private post. Reporters are never exposed to the reported account, and open duplicate reports from one reporter for one target are collapsed. A database `CHECK` prevents self-reports as defense in depth. Report records can contain sensitive free text; restrict database access accordingly and apply your retention policy.
+`POST /api/reports` requires a session and is rate-limited (10/hour). Reporter identity always comes from `req.user.id`, never the payload. Post reports run the same visibility/block check as reading the post, so a report cannot be used to confirm the existence or content of a private post. Reporters are never exposed to the reported account, and duplicate reports from one reporter for one target are collapsed. A database `CHECK` prevents self-reports as defense in depth. Report records can contain sensitive free text; restrict database access accordingly and apply your retention policy. Moderation history is only available to administrators and retains moderator/report identifier snapshots if either related account or report is later deleted.
 
 ## Input and upload protection
 

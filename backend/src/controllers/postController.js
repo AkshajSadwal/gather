@@ -5,6 +5,7 @@ const { persistUpload, removeLocal } = require('../services/storage');
 const { createNotification } = require('../services/notifications');
 const { getBlockState, isBlockedBetween, getBlockedUserIds } = require('../services/blocks');
 const { blockedIdsFor } = require('../services/relations');
+const { deletePostContent } = require('../services/contentService');
 
 const postInclude = (userId) => ({
   author: { select: { id: true, username: true, image: true, profile: { select: { displayName: true, avatarUrl: true } } } },
@@ -144,14 +145,6 @@ async function remove(req, res) {
   if (post.authorId !== req.user.id) throw new HttpError(403, 'FORBIDDEN', 'You can only delete your own posts.');
   await deletePostContent(post.id);
   return ok(res, { deleted: true });
-}
-
-async function deletePostContent(postId) {
-  const post = await prisma.post.findUnique({ where: { id: postId }, select: { id: true, media: { select: { url: true } }, reel: { include: { media: { select: { url: true } } } } } });
-  if (!post) return false;
-  await prisma.post.delete({ where: { id: post.id } });
-  await Promise.all([...post.media.map((item) => item.url), ...(post.reel?.media.map((item) => item.url) || [])].map((url) => removeLocal(url).catch(() => {})));
-  return true;
 }
 
 async function saved(req, res) {
@@ -305,4 +298,4 @@ async function deleteComment(req, res) {
   return ok(res, { deleted: true });
 }
 
-module.exports = { feed, explore, create, detail, remove, deletePostContent, saved, updateCaption, toggleLike, toggleBookmark, listComments, listReplies, createComment, deleteComment, assertPostVisible };
+module.exports = { feed, explore, create, detail, remove, saved, updateCaption, toggleLike, toggleBookmark, listComments, listReplies, createComment, deleteComment, assertPostVisible };

@@ -81,6 +81,8 @@ New browser media URLs go through `GET /api/media?key=...`; the backend authenti
 
 Admin access is configured by normalized usernames in `ADMIN_USERNAMES`. The admin report queue records review status, reviewer, and review time; post deletion shares the same media cleanup helper as owner deletion. Hashtag pages and popular Explore queries filter private, blocked, and muted authors before returning posts.
 
+Admin report decisions and content removals write `ModerationAction` rows inside the same database transaction as the report update/content deletion. Each row stores report and moderator snapshots; nullable foreign keys use `SET NULL` so deleting a report or moderator does not erase the history. The admin-only history API reads these rows with cursor pagination and no per-row lookups.
+
 Sessions are checked against a 30-second in-process user-existence cache shared by HTTP and Socket.IO authentication. Password changes record `passwordChangedAt`; sessions without a newer `authAt` are rejected, and account deletion/password changes invalidate the local cache entry immediately.
 
 ## Security layers

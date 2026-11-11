@@ -58,6 +58,11 @@ enum ReportStatus {
   DISMISSED
 }
 
+enum ModerationActionType {
+  REPORT_REVIEWED
+  CONTENT_REMOVED
+}
+
 model User {
   id                  String   @id @default(cuid())
   username            String   @unique @db.VarChar(30)
@@ -90,6 +95,7 @@ model User {
   mutesReceived      Mute[] @relation("muted")
   reportsFiled       Report[] @relation("reportFiled")
   reportsReviewed    Report[] @relation("reportReviewed")
+  moderationActions ModerationAction[] @relation("moderationModerator")
 }
 
 
@@ -130,11 +136,31 @@ model Report {
   reviewedAt DateTime?
   reporter   User             @relation("reportFiled", fields: [reporterId], references: [id], onDelete: Cascade)
   reviewedBy User?            @relation("reportReviewed", fields: [reviewedById], references: [id], onDelete: SetNull)
+  moderationActions ModerationAction[] @relation("moderationReport")
   @@unique([reporterId, targetType, targetId])
   @@index([status, createdAt])
   @@index([reviewedById])
 }
 
+model ModerationAction {
+  id               String                @id @default(cuid())
+  reportId         String?
+  reportRef        String
+  targetType       ReportTargetType
+  targetId         String
+  reason           ReportReason
+  moderatorId      String?
+  moderatorUsername String               @db.VarChar(30)
+  action           ModerationActionType
+  previousStatus   ReportStatus?
+  newStatus        ReportStatus?
+  createdAt        DateTime              @default(now())
+  report           Report?               @relation("moderationReport", fields: [reportId], references: [id], onDelete: SetNull)
+  moderator        User?                 @relation("moderationModerator", fields: [moderatorId], references: [id], onDelete: SetNull)
+  @@index([reportRef, createdAt])
+  @@index([moderatorId, createdAt])
+  @@index([createdAt, id])
+}
 model Profile {
   id          String @id @default(cuid())
   userId      String @unique
