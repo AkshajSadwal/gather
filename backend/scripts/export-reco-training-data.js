@@ -7,6 +7,7 @@ const prisma = require('../src/config/prisma');
 const { deriveTrainingLabels, LABEL_THRESHOLDS } = require('../src/services/recoEvents');
 
 const BATCH_SIZE = 250;
+const ACTION_LABEL_MATURITY_MS = 7 * 86400000;
 
 function opaqueId(kind, id) {
   return createHash('sha256').update(`gather-reco-v1:${kind}:${id}`).digest('hex').slice(0, 32);
@@ -59,12 +60,49 @@ async function exportTrainingData(outputPath) {
         if (!impression.user.personalizedRecs || (impression.user.recsResetAt && impression.user.recsResetAt > impression.servedAt)) continue;
         const dayStart = new Date(Date.UTC(impression.servedAt.getUTCFullYear(), impression.servedAt.getUTCMonth(), impression.servedAt.getUTCDate()));
         const priorStats = stats.filter((row) => row.reelId === impression.reelId && row.day < dayStart);
-        const actions = (eventsByImpression.get(impression.id) || []).map((event) => event.type);
+        const eventRows = (eventsByImpression.get(impression.id) || []).sort((a, b) => a.occurredAt - b.occurredAt);
+        const actions = eventRows.map((event) => event.type);
+        const matured = impression.servedAt.getTime() <= Date.now() - ACTION_LABEL_MATURITY_MS;
+        const lastOf = (positive, negative) => eventRows.filter((event) => event.type === positive || event.type === negative).at(-1)?.type || null;
+        const observedWatch = impression.seenAt && Number(impression.watchMs) > 0 && Number(impression.videoDurationMs) > 0;
+        const watchRatio = observedWatch ? impression.watchMs / impression.videoDurationMs : null;
+        const labelValues = {
+          is_click: 0,
+          is_like: lastOf('LIKE', 'UNLIKE') === 'LIKE' ? 1 : 0,
+          is_follow: lastOf('CREATOR_FOLLOW', 'CREATOR_UNFOLLOW') === 'CREATOR_FOLLOW' ? 1 : 0,
+          is_comment: actions.includes('COMMENT') ? 1 : 0,
+          is_forward: actions.includes('SHARE') ? 1 : 0,
+          is_hate: actions.includes('NOT_INTERESTED') ? 1 : 0,
+          long_view: watchRatio !== null && watchRatio >= 0.75 ? 1 : 0,
+          is_profile_enter: actions.includes('PROFILE_OPEN') ? 1 : 0,
+          complete_view: watchRatio !== null && watchRatio >= 0.9 ? 1 : 0,
+          short_view: watchRatio !== null && watchRatio < 0.25 ? 1 : 0
+        };
+        const labelsAvailable = {
+          is_click: false,
+          is_like: matured || lastOf('LIKE', 'UNLIKE') !== null,
+          is_follow: matured || lastOf('CREATOR_FOLLOW', 'CREATOR_UNFOLLOW') !== null,
+          is_comment: matured || actions.includes('COMMENT'),
+          is_forward: matured || actions.includes('SHARE'),
+          is_hate: matured || actions.includes('NOT_INTERESTED'),
+          long_view: observedWatch,
+          is_profile_enter: matured || actions.includes('PROFILE_OPEN'),
+          complete_view: observedWatch,
+          short_view: observedWatch
+        };
         const record = {
           impressionKey: opaqueId('impression', impression.id),
           viewerKey: opaqueId('viewer', impression.userId),
           reelKey: opaqueId('reel', impression.reelId),
           creatorKey: impression.creatorId ? opaqueId('creator', impression.creatorId) : null,
+          schemaVersion: impression.featureSchemaVersion || 'legacy-r5',
+          labelSchemaVersion: 'gather-labels-v1',
+          requestKey: opaqueId('request', impression.requestId),
+          retrievalModelVersion: impression.retrievalModelVersion,
+          rankingModelVersion: impression.rankingModelVersion,
+          // These snapshots are captured with the impression; never join current profile/catalog state into history.
+          userFeatures: impression.userFeaturesSnapshot,
+          reelFeatures: impression.reelFeaturesSnapshot,
           servedAt: impression.servedAt.toISOString(),
           seenAt: impression.seenAt?.toISOString() || null,
           position: impression.position,
@@ -73,6 +111,10 @@ async function exportTrainingData(outputPath) {
           visibleMs: impression.visibleMs,
           videoDurationMs: impression.videoDurationMs,
           completed: impression.completed,
+          labels: labelValues,
+          labelsAvailable,
+          watchLogSeconds: observedWatch ? Math.log1p(impression.watchMs / 1000) : 0,
+          watchLabelAvailable: !!observedWatch,
           labels: deriveTrainingLabels({ watchMs: impression.watchMs, visibleMs: impression.visibleMs, videoDurationMs: impression.videoDurationMs }, thresholds),
           // Impression-linked actions are supervised outcomes; prior stats are limited to days before servedAt below.
           actions: [...new Set(actions)],

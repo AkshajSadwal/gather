@@ -3,8 +3,21 @@ const { z } = require('zod');
 const prisma = require('../config/prisma');
 const { isBlockedBetween } = require('./blocks');
 const { mutedIdsFor } = require('./relations');
+let eventPrisma = prisma;
+let eventBlockCheck = isBlockedBetween;
+let eventMutedLookup = mutedIdsFor;
 
-const CLIENT_EVENT_TYPES = Object.freeze(['IMPRESSION_VISIBLE', 'WATCH_END', 'REPLAY', 'PROFILE_OPEN', 'NOT_INTERESTED']);
+function setReelEventDependenciesForTests(overrides = {}) {
+  eventPrisma = overrides.prisma || prisma;
+  eventBlockCheck = overrides.isBlockedBetween || isBlockedBetween;
+  eventMutedLookup = overrides.mutedIdsFor || mutedIdsFor;
+}
+
+function resetReelEventDependenciesForTests() {
+  setReelEventDependenciesForTests();
+}
+
+const CLIENT_EVENT_TYPES = Object.freeze(['IMPRESSION_VISIBLE', 'IMPRESSION_VIEWABLE', 'WATCH_START', 'WATCH_PROGRESS', 'WATCH_END', 'WATCH_COMPLETE', 'REPLAY', 'PROFILE_OPEN', 'NOT_INTERESTED']);
 const EVENT_WEIGHTS = Object.freeze({
   LIKE: 1.25,
   SAVE: 2,
@@ -39,6 +52,7 @@ const clientEventSchema = z.object({
   type: z.enum(CLIENT_EVENT_TYPES),
   reelId: z.string().trim().min(1).max(64),
   impressionId: z.string().trim().min(1).max(64).optional(),
+  requestId: z.string().trim().min(1).max(128).optional(),
   sessionId: z.string().trim().min(1).max(128).optional(),
   occurredAt: z.coerce.date().optional(),
   payload: payloadSchema.optional(),
@@ -93,10 +107,10 @@ function normalizePayload(payload = {}) {
   return normalized;
 }
 
-function eventWeight(type, payload = {}, durationMs = null) {
-  if (type === 'WATCH_END') {
+function eventWeight(type, payload = {}, durationMs = null, priorWatchMs = 0) {
+  if (['WATCH_END', 'WATCH_COMPLETE'].includes(type)) {
     const duration = payload.videoDurationMs || durationMs;
-    return deriveCompleted(payload.watchMs || 0, duration) ? EVENT_WEIGHTS.LONG_WATCH : 0;
+    return deriveCompleted(priorWatchMs + (payload.watchMs || 0), duration) ? EVENT_WEIGHTS.LONG_WATCH : 0;
   }
   return EVENT_WEIGHTS[type] || 0;
 }
@@ -109,13 +123,14 @@ function impressionOutcome(type) {
   })[type] || null;
 }
 
-function dailyIncrement(type, payload = {}, durationMs = null) {
+function dailyIncrement(type, payload = {}, durationMs = null, priorWatchMs = 0) {
   const values = {};
-  if (type === 'IMPRESSION_VISIBLE') values.views = 1;
-  if (type === 'WATCH_END') {
+  if (['IMPRESSION_VISIBLE', 'IMPRESSION_VIEWABLE'].includes(type)) values.views = 1;
+  if (['WATCH_END', 'WATCH_COMPLETE'].includes(type)) {
     values.watchMsSum = BigInt(payload.watchMs || 0);
-    if (deriveCompleted(payload.watchMs || 0, payload.videoDurationMs || durationMs)) values.completes = 1;
+    if (deriveCompleted(priorWatchMs + (payload.watchMs || 0), payload.videoDurationMs || durationMs)) values.completes = 1;
   }
+  if (type === 'WATCH_PROGRESS') values.watchMsSum = BigInt(payload.watchMs || 0);
   if (type === 'LIKE') values.likes = 1;
   if (type === 'SAVE') values.saves = 1;
   if (type === 'SHARE') values.shares = 1;
@@ -133,7 +148,7 @@ async function recordReelEvent(userId, input, { allowClientTypes = false } = {})
   const { occurredAt } = clampOccurredAt(input.occurredAt, receivedAt);
   const payload = normalizePayload(input.payload || {});
 
-  return prisma.$transaction(async (tx) => {
+  return eventPrisma.$transaction(async (tx) => {
     const account = await tx.user.findUnique({ where: { id: userId }, select: { personalizedRecs: true } });
     if (!account || !account.personalizedRecs) return { accepted: false, disabled: true };
 
@@ -142,7 +157,7 @@ async function recordReelEvent(userId, input, { allowClientTypes = false } = {})
       reel = await tx.reel.findUnique({ where: { id: input.reelId }, select: { id: true, authorId: true, durationMs: true, post: { select: { archivedAt: true } }, author: { select: { profile: { select: { visibility: true } } } } } });
       if (!reel || (reel.post?.archivedAt && reel.authorId !== userId)) return { accepted: false, rejected: true };
       if (reel.authorId !== userId) {
-        if (await isBlockedBetween(userId, reel.authorId) || (await mutedIdsFor(userId)).includes(reel.authorId)) return { accepted: false, rejected: true };
+        if (await eventBlockCheck(userId, reel.authorId) || (await eventMutedLookup(userId)).includes(reel.authorId)) return { accepted: false, rejected: true };
         if (reel.author.profile?.visibility === 'PRIVATE') {
           const follow = await tx.follow.findUnique({ where: { followerId_followedId: { followerId: userId, followedId: reel.authorId } }, select: { accepted: true } });
           if (!follow?.accepted) return { accepted: false, rejected: true };
@@ -152,7 +167,7 @@ async function recordReelEvent(userId, input, { allowClientTypes = false } = {})
 
     let impression = null;
     if (input.impressionId) {
-      impression = await tx.reelImpression.findUnique({ where: { id: input.impressionId }, select: { id: true, userId: true, reelId: true, creatorId: true, seenAt: true, completed: true, visibleMs: true, watchMs: true, maxProgressMs: true, replayCount: true, videoDurationMs: true } });
+      impression = await tx.reelImpression.findUnique({ where: { id: input.impressionId }, select: { id: true, userId: true, reelId: true, requestId: true, creatorId: true, seenAt: true, completed: true, visibleMs: true, watchMs: true, maxProgressMs: true, replayCount: true, videoDurationMs: true } });
       if (!impression || impression.userId !== userId || (input.reelId && impression.reelId !== input.reelId)) return { accepted: false, rejected: true };
       if (!reel) reel = await tx.reel.findUnique({ where: { id: impression.reelId }, select: { id: true, authorId: true, durationMs: true } });
       if (!reel) return { accepted: false, rejected: true };
@@ -164,15 +179,15 @@ async function recordReelEvent(userId, input, { allowClientTypes = false } = {})
     const watchPayload = { ...payload, videoDurationMs: durationMs };
     const inserted = await tx.reelEvent.createMany({ data: [{
       eventId, type: eventType, userId, reelId: reel?.id || null, creatorId,
-      impressionId: impression?.id || null, sessionId: input.sessionId || null,
+      impressionId: impression?.id || null, requestId: impression?.requestId || null, sessionId: input.sessionId || null,
       occurredAt, receivedAt, payload: watchPayload, appVersion: input.appVersion || null
     }], skipDuplicates: true });
     if (!inserted.count) return { accepted: false, duplicate: true };
 
     if (impression) {
       const outcome = impressionOutcome(eventType) || {};
-      if (eventType === 'IMPRESSION_VISIBLE') outcome.seenAt = occurredAt;
-      if (eventType === 'WATCH_END') {
+      if (['IMPRESSION_VISIBLE', 'IMPRESSION_VIEWABLE', 'WATCH_START'].includes(eventType)) outcome.seenAt = impression.seenAt || occurredAt;
+      if (['WATCH_END', 'WATCH_PROGRESS', 'WATCH_COMPLETE'].includes(eventType)) {
         outcome.visibleMs = { increment: payload.visibleMs || 0 };
         outcome.watchMs = { increment: payload.watchMs || 0 };
         outcome.maxProgressMs = Math.max(impression.maxProgressMs, payload.maxProgressMs || 0);
@@ -184,7 +199,7 @@ async function recordReelEvent(userId, input, { allowClientTypes = false } = {})
       if (Object.keys(outcome).length) await tx.reelImpression.update({ where: { id: impression.id }, data: outcome });
     }
 
-    const weight = eventWeight(eventType, watchPayload, durationMs);
+    const weight = eventWeight(eventType, watchPayload, durationMs, impression?.watchMs || 0);
     if (creatorId && weight) {
       const key = { userId_creatorId: { userId, creatorId } };
       const existing = await tx.userCreatorAffinity.findUnique({ where: key });
@@ -199,7 +214,7 @@ async function recordReelEvent(userId, input, { allowClientTypes = false } = {})
     }
 
     if (reel) {
-      const increments = dailyIncrement(eventType, watchPayload, durationMs);
+      const increments = dailyIncrement(eventType, watchPayload, durationMs, impression?.watchMs || 0);
       if (Object.keys(increments).length) {
         const day = new Date(Date.UTC(occurredAt.getUTCFullYear(), occurredAt.getUTCMonth(), occurredAt.getUTCDate()));
         const update = Object.fromEntries(Object.entries(increments).map(([key, value]) => [key, { increment: value }]));
@@ -227,5 +242,6 @@ function logPostReelEvent(userId, postId, type, extra = {}) {
 module.exports = {
   CLIENT_EVENT_TYPES, EVENT_WEIGHTS, AFFINITY_HALF_LIFE_DAYS, LABEL_THRESHOLDS,
   payloadSchema, clientEventSchema, deriveCompleted, affinityDecay, clampOccurredAt,
-  deriveTrainingLabels, normalizePayload, eventWeight, recordReelEvent, logReelEvent, logPostReelEvent
+  deriveTrainingLabels, normalizePayload, eventWeight, recordReelEvent, logReelEvent, logPostReelEvent,
+  setReelEventDependenciesForTests, resetReelEventDependenciesForTests
 };

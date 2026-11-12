@@ -138,6 +138,8 @@ test('report payloads require exactly one target, a known reason, and bounded de
 test('reel recommendation event validation and labels are bounded and deterministic', () => {
   const valid = { eventId: 'evt-1', type: 'WATCH_END', reelId: 'reel-1', payload: { watchMs: 9000, videoDurationMs: 10000, visibleMs: 4000 } };
   assert.equal(clientEventSchema.safeParse(valid).success, true);
+  assert.equal(clientEventSchema.safeParse({ ...valid, type: 'IMPRESSION_VIEWABLE', requestId: 'req-1', payload: { visibleMs: 1000 } }).success, true);
+  assert.equal(clientEventSchema.safeParse({ ...valid, type: 'WATCH_PROGRESS', payload: { watchMs: 5000, videoDurationMs: 10000 } }).success, true);
   assert.equal(clientEventSchema.safeParse({ ...valid, type: 'REPORT' }).success, false);
   assert.equal(clientEventSchema.safeParse({ ...valid, payload: { watchMs: -1 } }).success, false);
   assert.equal(deriveCompleted(8999, 10000), false);

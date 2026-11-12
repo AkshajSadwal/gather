@@ -1,7 +1,7 @@
 const prisma = require('../config/prisma');
 
 const WINDOWS = Object.freeze({ '24h': 24 * 60 * 60 * 1000, '7d': 7 * 86400000, '30d': 30 * 86400000, all: null });
-const EVENTS = ['LIKE', 'SAVE', 'SHARE', 'COMMENT', 'NOT_INTERESTED', 'REPORT', 'CREATOR_BLOCK', 'CREATOR_MUTE'];
+const EVENTS = ['LIKE', 'UNLIKE', 'SAVE', 'UNSAVE', 'SHARE', 'COMMENT', 'CREATOR_FOLLOW', 'CREATOR_UNFOLLOW', 'NOT_INTERESTED', 'REPORT', 'CREATOR_BLOCK', 'CREATOR_MUTE'];
 
 async function computeWindow(userIds, name, now) {
   const duration = WINDOWS[name];
@@ -35,8 +35,8 @@ async function computeWindow(userIds, name, now) {
       reelsWatched: watchedTotal.count,
       averageWatchMs: watchedTotal.count ? Math.round(watchedTotal.watchMs / watchedTotal.count) : 0,
       completionRate: Number(((completeMap.get(userId) || 0) / denominator).toFixed(4)),
-      likeRate: Number((count('LIKE') / denominator).toFixed(4)),
-      saveRate: Number((count('SAVE') / denominator).toFixed(4)),
+      likeRate: Number((Math.max(0, count('LIKE') - count('UNLIKE')) / denominator).toFixed(4)),
+      saveRate: Number((Math.max(0, count('SAVE') - count('UNSAVE')) / denominator).toFixed(4)),
       shareRate: Number((count('SHARE') / denominator).toFixed(4)),
       commentRate: Number((count('COMMENT') / denominator).toFixed(4)),
       skipCount: skipMap.get(userId) || 0,
@@ -62,7 +62,7 @@ async function runFeatureRecompute() {
         where: { userId: { in: userIds }, seenAt: { gte: recentCutoff } }, take: 10000,
         select: {
           userId: true,
-          reel: { select: { post: { select: { hashtags: { select: { hashtag: { select: { tag: true } } } } } } } }
+          reel: { select: { language: true, post: { select: { hashtags: { select: { hashtag: { select: { tag: true } } } } } } } }
         }
       })
     ]);
@@ -73,13 +73,19 @@ async function runFeatureRecompute() {
       topByUser.set(row.userId, list);
     }
     const hashtagCounts = new Map();
+    const languageCounts = new Map();
     for (const impression of recentImpressions) {
       const counts = hashtagCounts.get(impression.userId) || new Map();
       for (const link of impression.reel.post?.hashtags || []) counts.set(link.hashtag.tag, (counts.get(link.hashtag.tag) || 0) + 1);
       hashtagCounts.set(impression.userId, counts);
+      const languages = languageCounts.get(impression.userId) || new Map();
+      if (impression.reel.language) languages.set(impression.reel.language, (languages.get(impression.reel.language) || 0) + 1);
+      languageCounts.set(impression.userId, languages);
     }
     await prisma.$transaction(userIds.map((userId) => {
-      const features = Object.fromEntries(windows.map(([name, values]) => [name, { ...values.get(userId), topCreators: topByUser.get(userId) || [], topHashtags: [...(hashtagCounts.get(userId) || new Map())].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([tag, count]) => ({ tag, count })) }]));
+      const topHashtags = [...(hashtagCounts.get(userId) || new Map())].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([tag, count]) => ({ tag, count }));
+      const topLanguages = [...(languageCounts.get(userId) || new Map())].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([language, count]) => ({ language, count }));
+      const features = Object.fromEntries(windows.map(([name, values]) => [name, { ...values.get(userId), topCreators: topByUser.get(userId) || [], topHashtags, topLanguages }]));
       return prisma.userRecoFeatures.upsert({ where: { userId }, create: { userId, features, computedAt: now }, update: { features, computedAt: now } });
     }));
     console.log(`[reco] features recomputed users=${userIds.length}`);
@@ -88,14 +94,54 @@ async function runFeatureRecompute() {
   }
 }
 
+async function runReelFeatureRecompute() {
+  try {
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - 30 * 86400000);
+    const stats = await prisma.reelStatsDaily.groupBy({ by: ['reelId'], where: { day: { gte: cutoff } }, _sum: { views: true, likes: true, saves: true, shares: true, comments: true, watchMsSum: true, completes: true } });
+    const statsByReel = new Map(stats.map((row) => [row.reelId, row._sum]));
+    let cursor;
+    let updated = 0;
+    for (;;) {
+      const batch = await prisma.reel.findMany({
+        where: { ...(cursor ? { id: { gt: cursor } } : {}), OR: [{ post: { is: { archivedAt: null } } }, { post: { is: null } }] },
+        orderBy: { id: 'asc' }, take: 100,
+        select: { id: true, durationMs: true, createdAt: true, language: true, authorId: true, author: { select: { profile: { select: { visibility: true } } } }, post: { select: { hashtags: { select: { hashtag: { select: { tag: true } } } } } } }
+      });
+      if (!batch.length) break;
+      await Promise.all(batch.map((reel) => {
+        const sum = statsByReel.get(reel.id) || {};
+        const views = sum.views || 0;
+        const features = {
+          schemaVersion: 'gather-reco-v1', computedAt: now.toISOString(),
+          durationMs: reel.durationMs, ageHours: Math.max(0, (now - reel.createdAt) / 3600000),
+          language: reel.language || null, creatorVisibility: reel.author?.profile?.visibility || 'PUBLIC',
+          hashtags: (reel.post?.hashtags || []).map((entry) => entry.hashtag.tag).filter(Boolean).slice(0, 10),
+          impressions: views, likes: sum.likes || 0, saves: sum.saves || 0, shares: sum.shares || 0,
+          comments: sum.comments || 0, averageWatchMs: views ? Number(sum.watchMsSum || 0) / views : 0,
+          completionRate: views ? (sum.completes || 0) / views : 0,
+          likeRate: views ? (sum.likes || 0) / views : 0
+        };
+        return prisma.reelRecoFeatures.upsert({ where: { reelId: reel.id }, create: { reelId: reel.id, features, featureVersion: 'gather-reel-v1' }, update: { features, featureVersion: 'gather-reel-v1' } });
+      }));
+      updated += batch.length;
+      cursor = batch[batch.length - 1].id;
+      if (batch.length < 100) break;
+    }
+    console.log(`[reco] reel features recomputed reels=${updated}`);
+  } catch {
+    console.warn('[reco] reel feature recompute failed');
+  }
+}
 function startFeatureRecompute() {
   if (process.env.NODE_ENV === 'test') return null;
+  void Promise.all([runFeatureRecompute(), runReelFeatureRecompute()]);
   const configured = Number(process.env.RECO_FEATURES_INTERVAL_MS || 600000);
-  const timer = setInterval(() => { void runFeatureRecompute(); }, Number.isFinite(configured) && configured > 0 ? configured : 600000);
+  const timer = setInterval(() => { void Promise.all([runFeatureRecompute(), runReelFeatureRecompute()]); }, Number.isFinite(configured) && configured > 0 ? configured : 600000);
   timer.unref();
   return timer;
 }
 
 function stopFeatureRecompute(timer) { if (timer) clearInterval(timer); }
 
-module.exports = { runFeatureRecompute, startFeatureRecompute, stopFeatureRecompute };
+module.exports = { runFeatureRecompute, runReelFeatureRecompute, startFeatureRecompute, stopFeatureRecompute };

@@ -39,7 +39,11 @@ enum ReelCandidateSource {
 
 enum ReelEventType {
   IMPRESSION_VISIBLE
+  IMPRESSION_VIEWABLE
+  WATCH_START
+  WATCH_PROGRESS
   WATCH_END
+  WATCH_COMPLETE
   REPLAY
   LIKE
   UNLIKE
@@ -52,6 +56,7 @@ enum ReelEventType {
   PROFILE_OPEN
   NOT_INTERESTED
   REPORT
+  REPORT_REEL
   CREATOR_BLOCK
   CREATOR_MUTE
 }
@@ -143,6 +148,7 @@ model User {
   recoAffinities UserCreatorAffinity[] @relation("affinityUser")
   creatorAffinities UserCreatorAffinity[] @relation("affinityCreator")
   recoFeatures UserRecoFeatures?
+  recommendationRequests RecommendationRequest[]
 }
 
 
@@ -483,6 +489,7 @@ model Reel {
   impressions ReelImpression[]
   events ReelEvent[]
   dailyStats ReelStatsDaily[]
+  recoFeatures ReelRecoFeatures?
   @@index([createdAt])
   @@index([authorId, createdAt])
 }
@@ -520,6 +527,10 @@ model ReelImpression {
   retrievalScore       Float?
   rankingScore         Float?
   modelVersion         String?               @db.VarChar(64)
+  retrievalModelVersion String?              @db.VarChar(64)
+  rankingModelVersion  String?               @db.VarChar(64)
+  featureSchemaVersion String?               @db.VarChar(64)
+  reelFeaturesSnapshot Json?
   experimentId         String?               @db.VarChar(64)
   appVersion           String?               @db.VarChar(32)
   userFeaturesSnapshot Json?
@@ -532,6 +543,7 @@ model ReelImpression {
   notInterested        Boolean               @default(false)
   user                 User                  @relation("reelImpressionViewer", fields: [userId], references: [id], onDelete: Cascade)
   reel                 Reel                  @relation(fields: [reelId], references: [id], onDelete: Cascade)
+  request              RecommendationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
   creator              User?                 @relation("reelImpressionCreator", fields: [creatorId], references: [id], onDelete: SetNull)
   events               ReelEvent[]
   @@unique([requestId, position])
@@ -550,10 +562,12 @@ model ReelEvent {
   reelId      String?
   creatorId   String?
   impressionId String?
+  requestId    String?
   sessionId   String?
   occurredAt  DateTime
   receivedAt  DateTime       @default(now())
   payload     Json?
+  schemaVersion String       @default("gather-events-v1") @db.VarChar(32)
   appVersion  String?        @db.VarChar(32)
   user        User           @relation("reelEventUser", fields: [userId], references: [id], onDelete: Cascade)
   reel        Reel?          @relation(fields: [reelId], references: [id], onDelete: SetNull)
@@ -563,6 +577,27 @@ model ReelEvent {
   @@index([reelId, occurredAt])
   @@index([impressionId])
   @@index([type, occurredAt])
+  @@index([requestId, occurredAt])
+}
+
+model RecommendationRequest {
+  id                    String   @id
+  userId                String
+  sessionId             String?  @db.VarChar(128)
+  requestedAt           DateTime @default(now())
+  feedSize              Int
+  cursor                String?  @db.VarChar(256)
+  retrievalModelVersion String?  @db.VarChar(64)
+  rankingModelVersion   String?  @db.VarChar(64)
+  featureSchemaVersion  String   @db.VarChar(64)
+  provider              String   @db.VarChar(32)
+  latencyMs             Int?
+  status                String   @default("OK") @db.VarChar(24)
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  impressions           ReelImpression[]
+  @@index([userId, requestedAt])
+  @@index([provider, requestedAt])
+  @@index([status, requestedAt])
 }
 
 model UserCreatorAffinity {
@@ -583,8 +618,30 @@ model UserCreatorAffinity {
 model UserRecoFeatures {
   userId     String   @id
   features   Json
+  featureVersion String @default("gather-user-v1") @db.VarChar(64)
   computedAt DateTime
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ReelRecoFeatures {
+  reelId        String   @id
+  features      Json
+  featureVersion String  @default("gather-reel-v1") @db.VarChar(64)
+  updatedAt     DateTime @updatedAt
+  reel          Reel     @relation(fields: [reelId], references: [id], onDelete: Cascade)
+}
+
+model RecommendationModelVersion {
+  id                     String   @id @default(cuid())
+  provider               String   @db.VarChar(32)
+  retrievalModelVersion  String?  @db.VarChar(64)
+  rankingModelVersion    String?  @db.VarChar(64)
+  retrievalIndexVersion  String?  @db.VarChar(64)
+  featureSchemaVersion   String   @db.VarChar(64)
+  rankingFormulaVersion  String   @db.VarChar(64)
+  manifestReference      String?  @db.VarChar(512)
+  activatedAt            DateTime @default(now())
+  @@index([activatedAt])
 }
 
 model ReelStatsDaily {

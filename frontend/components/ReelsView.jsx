@@ -78,9 +78,8 @@ export default function ReelsView() {
         if (!video) return;
         if (entry.isIntersecting && entry.intersectionRatio >= 0.6) {
           const reel = reels.find((item) => item.id === reelId);
-          const state = tracking.current.get(reelId) || { visibleMs: 0, watchMs: 0, maxProgressMs: 0, replayCount: 0, lastCurrent: 0, visible: false };
+          const state = tracking.current.get(reelId) || { visibleMs: 0, watchMs: 0, progressReportedMs: 0, maxProgressMs: 0, replayCount: 0, lastCurrent: 0, visible: false, viewableSent: false, playStarted: false };
           state.visible = true;
-          if (!state.impressionSent && reel?.impressionId) { state.impressionSent = true; trackReelEvent({ type: 'IMPRESSION_VISIBLE', reelId, impressionId: reel.impressionId, payload: { position: reel.position } }); }
           tracking.current.set(reelId, state);
           attemptPlay(video, reelId);
         } else {
@@ -88,8 +87,13 @@ export default function ReelsView() {
           if (state?.visible) {
             state.visible = false;
             const reel = reels.find((item) => item.id === reelId);
-            if (reel?.impressionId) trackReelEvent({ type: 'WATCH_END', reelId, impressionId: reel.impressionId, payload: { visibleMs: state.visibleMs, watchMs: state.watchMs, maxProgressMs: state.maxProgressMs, replayCount: state.replayCount, videoDurationMs: Math.round(video.duration * 1000) || undefined } });
-            state.visibleMs = 0; state.watchMs = 0; state.maxProgressMs = 0; state.replayCount = 0;
+            if (reel?.impressionId) {
+              const delta = Math.max(0, state.watchMs - state.progressReportedMs);
+              if (delta) trackReelEvent({ type: 'WATCH_PROGRESS', reelId, impressionId: reel.impressionId, payload: { watchMs: delta, videoDurationMs: Math.round(video.duration * 1000) || undefined } });
+              trackReelEvent({ type: 'WATCH_END', reelId, impressionId: reel.impressionId, payload: { visibleMs: state.visibleMs, watchMs: 0, maxProgressMs: state.maxProgressMs, replayCount: state.replayCount, videoDurationMs: Math.round(video.duration * 1000) || undefined } });
+              state.progressReportedMs = state.watchMs;
+            }
+            state.visibleMs = 0; state.watchMs = 0; state.progressReportedMs = 0; state.maxProgressMs = 0; state.replayCount = 0;
           }
           video.pause();
           setPlaying((all) => ({ ...all, [reelId]: false }));
@@ -105,18 +109,37 @@ export default function ReelsView() {
     const finishVisible = () => tracking.current.forEach((state, reelId) => {
       if (!state.visible) return;
       state.visible = false;
+      state.lastMeasuredTimeMs = null;
       const reel = reelData.current.get(reelId);
-      if (reel?.impressionId) trackReelEvent({ type: 'WATCH_END', reelId, impressionId: reel.impressionId, payload: { visibleMs: state.visibleMs, watchMs: state.watchMs, maxProgressMs: state.maxProgressMs, replayCount: state.replayCount, videoDurationMs: Math.round((videos.current.get(reelId)?.duration || 0) * 1000) || undefined } });
+      if (reel?.impressionId) {
+        const video = videos.current.get(reelId);
+        const delta = Math.max(0, state.watchMs - state.progressReportedMs);
+        if (delta) trackReelEvent({ type: 'WATCH_PROGRESS', reelId, impressionId: reel.impressionId, payload: { watchMs: delta, videoDurationMs: Math.round((video?.duration || 0) * 1000) || undefined } });
+        trackReelEvent({ type: 'WATCH_END', reelId, impressionId: reel.impressionId, payload: { visibleMs: state.visibleMs, watchMs: 0, maxProgressMs: state.maxProgressMs, replayCount: state.replayCount, videoDurationMs: Math.round((video?.duration || 0) * 1000) || undefined } });
+        state.progressReportedMs = state.watchMs;
+      }
     });
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'hidden') { finishVisible(); void flushRecoEvents(true); return; }
       tracking.current.forEach((state, reelId) => {
         if (!state.visible) return;
         state.visibleMs += 1000;
+        const reel = reelData.current.get(reelId);
+        if (!state.viewableSent && state.visibleMs >= 1000 && reel?.impressionId) {
+          state.viewableSent = true;
+          trackReelEvent({ type: 'IMPRESSION_VIEWABLE', reelId, impressionId: reel.impressionId, payload: { visibleMs: state.visibleMs, position: reel.position } });
+        }
         const video = videos.current.get(reelId);
         if (video && !video.paused && !video.ended) {
-          state.watchMs += 1000;
+          const currentMs = Math.round(video.currentTime * 1000);
+          if (state.lastMeasuredTimeMs != null) state.watchMs += Math.min(1500, Math.max(0, currentMs - state.lastMeasuredTimeMs));
+          state.lastMeasuredTimeMs = currentMs;
           state.maxProgressMs = Math.max(state.maxProgressMs, Math.round(video.currentTime * 1000));
+          if (state.watchMs - state.progressReportedMs >= 5000 && reel?.impressionId) {
+            const delta = state.watchMs - state.progressReportedMs;
+            state.progressReportedMs = state.watchMs;
+            trackReelEvent({ type: 'WATCH_PROGRESS', reelId, impressionId: reel.impressionId, payload: { watchMs: delta, maxProgressMs: state.maxProgressMs, videoDurationMs: Math.round(video.duration * 1000) || undefined } });
+          }
         }
       });
     }, 1000);
@@ -280,8 +303,13 @@ export default function ReelsView() {
               if (event.currentTarget.paused) event.currentTarget.play().then(() => setPlaying((all) => ({ ...all, [reel.id]: true }))).catch(() => {});
               else { event.currentTarget.pause(); setPlaying((all) => ({ ...all, [reel.id]: false })); }
             }}
-            onPlay={() => setPlaying((all) => ({ ...all, [reel.id]: true }))}
-            onPause={() => setPlaying((all) => ({ ...all, [reel.id]: false }))}
+            onPlay={(event) => {
+              const state = tracking.current.get(reel.id);
+              if (state) state.lastMeasuredTimeMs = Math.round(event.currentTarget.currentTime * 1000);
+              if (state && !state.playStarted && reel.impressionId) { state.playStarted = true; trackReelEvent({ type: 'WATCH_START', reelId: reel.id, impressionId: reel.impressionId }); }
+              setPlaying((all) => ({ ...all, [reel.id]: true }));
+            }}
+            onPause={() => { const state = tracking.current.get(reel.id); if (state) state.lastMeasuredTimeMs = null; setPlaying((all) => ({ ...all, [reel.id]: false })); }}
             className="h-full w-full object-cover"
           />
           <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-black/20" />
