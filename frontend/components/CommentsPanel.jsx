@@ -3,13 +3,13 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
-import { Flag, LoaderCircle, MessageCircle, Reply, Trash2 } from 'lucide-react';
+import { Flag, Heart, LoaderCircle, MessageCircle, Pin, Reply, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
 import Avatar from './Avatar';
 import ReportDialog from './ReportDialog';
 import { useToast } from './Providers';
 
-export default function CommentsPanel({ postId, postAuthorId, onCommentAdded }) {
+export default function CommentsPanel({ postId, postAuthorId, onCommentAdded, recoImpressionId }) {
   const { data: session, status } = useSession();
   const [comments, setComments] = useState([]);
   const [nextCursor, setNextCursor] = useState(null);
@@ -56,7 +56,7 @@ export default function CommentsPanel({ postId, postAuthorId, onCommentAdded }) 
     setBusy(true);
     try {
       const data = await api(`/posts/${encodeURIComponent(postId)}/comments`, {
-        method: 'POST', body: JSON.stringify({ body: draft, ...(replyTarget ? { parentId: replyTarget.id } : {}) })
+        method: 'POST', headers: recoImpressionId ? { 'x-reco-impression-id': recoImpressionId } : undefined, body: JSON.stringify({ body: draft, ...(replyTarget ? { parentId: replyTarget.id } : {}) })
       });
       if (replyTarget) {
         setReplies((all) => ({ ...all, [replyTarget.id]: { ...all[replyTarget.id], expanded: true, items: [data.comment, ...(all[replyTarget.id]?.items || [])] } }));
@@ -84,6 +84,25 @@ export default function CommentsPanel({ postId, postAuthorId, onCommentAdded }) 
     } catch (problem) { notify(problem.message, 'error'); }
   };
 
+  const updateItem = (itemId, parentId, update) => {
+    if (parentId) setReplies((all) => ({ ...all, [parentId]: { ...all[parentId], items: (all[parentId]?.items || []).map((item) => item.id === itemId ? update(item) : item) } }));
+    else setComments((all) => all.map((item) => item.id === itemId ? update(item) : item));
+  };
+
+  const toggleLike = async (item, parentId) => {
+    try {
+      const result = await api(`/comments/${encodeURIComponent(item.id)}/like`, { method: 'POST' });
+      updateItem(item.id, parentId, (current) => ({ ...current, likedByMe: result.liked, likeCount: result.count }));
+    } catch (problem) { notify(problem.message, 'error'); }
+  };
+
+  const togglePin = async (item) => {
+    try {
+      const result = await api(`/comments/${encodeURIComponent(item.id)}/pin`, { method: 'POST' });
+      setComments((all) => all.map((current) => ({ ...current, pinnedAt: current.id === item.id && result.pinned ? result.pinnedAt : null })));
+    } catch (problem) { notify(problem.message, 'error'); }
+  };
+
   const renderComment = (item, parentId = null) => {
     const own = session?.user?.id === item.user.id;
     const canDelete = own || session?.user?.id === postAuthorId;
@@ -91,12 +110,14 @@ export default function CommentsPanel({ postId, postAuthorId, onCommentAdded }) 
     return <div key={item.id} className="flex gap-3">
       <Avatar src={item.user.image} name={item.user.username} size="xs" />
       <div className="min-w-0 flex-1">
-        <div className="break-words text-sm"><Link href={`/profile/${item.user.username}`} className="mr-2 font-semibold hover:underline">@{item.user.username}</Link>{item.body}</div>
+        <div className="break-words text-sm">{item.pinnedAt && <span className="mr-1 inline-flex items-center gap-1 text-[10px] font-semibold text-moss"><Pin size={11} />Pinned</span>}<Link href={`/profile/${item.user.username}`} className="mr-2 font-semibold hover:underline">@{item.user.username}</Link>{item.body}</div>
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink/45">
           <span>{new Date(item.createdAt).toLocaleDateString()}</span>
+          {status === 'authenticated' && <button type="button" onClick={() => void toggleLike(item, parentId)} aria-label={item.likedByMe ? 'Unlike comment' : 'Like comment'} className={`inline-flex items-center gap-1 ${item.likedByMe ? 'text-coral' : 'hover:text-coral'}`}><Heart size={12} fill={item.likedByMe ? 'currentColor' : 'none'} />{item.likeCount || 0}</button>}
           {!parentId && status === 'authenticated' && <button type="button" onClick={() => setReplyTarget(item)} className="inline-flex items-center gap-1 hover:text-moss"><Reply size={12} />Reply</button>}
           {!parentId && Number(item._count?.replies || 0) > 0 && <button type="button" onClick={() => replyState.expanded ? setReplies((all) => ({ ...all, [item.id]: { ...all[item.id], expanded: false } })) : void loadReplies(item.id)} className="inline-flex items-center gap-1 hover:text-moss"><MessageCircle size={12} />{replyState.expanded ? 'Hide' : `View ${item._count.replies}`} replies</button>}
           {canDelete && <button type="button" onClick={() => void remove(item, parentId)} aria-label="Delete comment" className="hover:text-coral"><Trash2 size={13} /></button>}
+          {!parentId && session?.user?.id === postAuthorId && <button type="button" onClick={() => void togglePin(item)} aria-label={item.pinnedAt ? 'Unpin comment' : 'Pin comment'} className="hover:text-moss"><Pin size={13} /></button>}
           {session?.user?.id && !own && <button type="button" onClick={() => setReportingId(item.id)} aria-label="Report comment" className="hover:text-coral"><Flag size={13} /></button>}
         </div>
         {replyState.error && <p className="mt-2 text-xs text-coral">{replyState.error} <button onClick={() => void loadReplies(item.id)} className="underline">Retry</button></p>}

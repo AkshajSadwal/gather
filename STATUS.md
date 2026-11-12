@@ -73,3 +73,15 @@ Backend syntax checks, frontend lint, and Prisma schema validation pass. Postgre
 
 - Added transactional audit records for report decisions and post/comment removal, with moderator and report snapshots that remain after related records are deleted.
 - Added the admin-only paginated moderation-history endpoint and responsive history page. Prisma validation, backend lint, frontend lint, and targeted Node syntax checks passed; the database integration test was added but not run.
+
+## Round 4 social features
+
+- Added post pin/archive controls, Close Friends audiences and story rings, comment likes/pins, story replies, realtime message reactions, and multi-recipient post/reel sharing in Messages.
+- Prisma schema changes are in migration `20261115000000_close_friends_pins_reactions`; the migration has not been applied or generated against the local database by this development session.
+- Backend and frontend lint, Prisma validation, targeted syntax checks, and 9 unit tests passed. The production build compiled and generated static pages, then failed while copying traces into `frontend/.next/standalone` with Windows `EPERM`; integration tests were added but not run because they need PostgreSQL.
+
+## Round 5 recommendation data foundation
+
+- Added migration `20261116000000_reel_reco_events` for viewer-owned reel impressions/events, creator affinities, feature snapshots, and daily reel statistics.
+- Added the `heuristic_v0` personalized feed, bounded idempotent event ingestion, opt-out/reset controls, batched feature snapshots, retention cleanup, and local JSONL training export. Recommendation event and impression privacy rules are documented in `docs/RECOMMENDATION_DATA.md`.
+- Backend/frontend syntax lint and feature unit coverage were added; PostgreSQL integration and export runs were intentionally not run because they require a migrated local database.

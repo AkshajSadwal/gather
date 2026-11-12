@@ -99,3 +99,5 @@ Set `ADMIN_USERNAMES` to a comma-separated list of lowercase or mixed-case usern
 ## Kubernetes
 
 A single-backend Kubernetes baseline is available in `k8s/` with container build files at the repository root (`Dockerfile.backend` and `Dockerfile.frontend`). See `KUBERNETES.md` and `k8s/README.md` for image builds, secrets, mediasoup networking, MinIO public media URLs, migrations, and the current single-replica limitation.
+
+Reel recommendation feature snapshots refresh every `RECO_FEATURES_INTERVAL_MS` (default `600000` ms). Recommendation events and impressions are cleaned after `RECO_EVENT_RETENTION_DAYS` (default `180` days); set it to `0` to disable this cleanup.

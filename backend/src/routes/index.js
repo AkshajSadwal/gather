@@ -9,6 +9,7 @@ const users = require('../controllers/userController');
 const posts = require('../controllers/postController');
 const messages = require('../controllers/messageController');
 const stories = require('../controllers/storyController');
+const closeFriends = require('../controllers/closeFriendController');
 const reels = require('../controllers/reelController');
 const notifications = require('../controllers/notificationController');
 const reports = require('../controllers/reportController');
@@ -16,6 +17,8 @@ const tags = require('../controllers/tagController');
 const media = require('../controllers/mediaController');
 const relations = require('../controllers/relationController');
 const account = require('../controllers/accountController');
+const reco = require('../controllers/recoController');
+const recoSettings = require('../controllers/recoSettingsController');
 
 const router = express.Router();
 const accountOrIpKey = (req) => req.user?.id ? `user:${req.user.id}` : `ip:${ipKeyGenerator(req.ip)}`;
@@ -26,6 +29,7 @@ const reportLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 10, keyGenera
 const writeLimiter = rateLimit({ windowMs: 60 * 1000, limit: 50, keyGenerator: accountOrIpKey, handler: rateLimitHandler, standardHeaders: 'draft-8', legacyHeaders: false });
 const searchLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, keyGenerator: accountOrIpKey, handler: rateLimitHandler, standardHeaders: 'draft-8', legacyHeaders: false });
 const readLimiter = rateLimit({ windowMs: 60 * 1000, limit: 30, keyGenerator: accountOrIpKey, handler: rateLimitHandler, standardHeaders: 'draft-8', legacyHeaders: false });
+const recoLimiter = rateLimit({ windowMs: 60 * 1000, limit: 120, keyGenerator: accountOrIpKey, handler: rateLimitHandler, standardHeaders: 'draft-8', legacyHeaders: false });
 const uploadIpLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   limit: 30,
@@ -79,8 +83,11 @@ router.get('/media', route(media.serve));
 router.get('/posts/feed', requireAuth, route(posts.feed));
 router.get('/posts/saved', requireAuth, route(posts.saved));
 router.get('/posts/explore', maybeAuth, route(posts.explore));
+router.get('/posts/archived', requireAuth, route(posts.archived));
 router.get('/tags/:tag', maybeAuth, route(tags.list));
 router.post('/posts', requireAuth, uploadIpLimiter, uploadAccountLimiter, writeLimiter, upload.array('media', 10), route(posts.create));
+router.post('/posts/:id/pin', requireAuth, writeLimiter, route(posts.togglePin));
+router.post('/posts/:id/archive', requireAuth, writeLimiter, route(posts.toggleArchive));
 router.get('/posts/:id', maybeAuth, route(posts.detail));
 router.patch('/posts/:id', requireAuth, writeLimiter, route(posts.updateCaption));
 router.delete('/posts/:id', requireAuth, writeLimiter, route(posts.remove));
@@ -89,6 +96,8 @@ router.post('/posts/:id/bookmark', requireAuth, writeLimiter, route(posts.toggle
 router.get('/posts/:id/comments', maybeAuth, route(posts.listComments));
 router.post('/posts/:id/comments', requireAuth, writeLimiter, route(posts.createComment));
 router.get('/comments/:commentId/replies', maybeAuth, route(posts.listReplies));
+router.post('/comments/:commentId/like', requireAuth, writeLimiter, route(posts.toggleCommentLike));
+router.post('/comments/:commentId/pin', requireAuth, writeLimiter, route(posts.toggleCommentPin));
 router.delete('/comments/:commentId', requireAuth, writeLimiter, route(posts.deleteComment));
 router.get('/notifications', requireAuth, route(notifications.list));
 router.get('/notifications/unread', requireAuth, route(notifications.unread));
@@ -96,18 +105,29 @@ router.get('/notifications/unread-count', requireAuth, route(notifications.unrea
 router.post('/notifications/:id/read', requireAuth, readLimiter, route(notifications.markRead));
 
 router.get('/messages/conversations', requireAuth, route(messages.conversations));
+router.get('/messages/share-recipients', requireAuth, readLimiter, route(messages.shareRecipients));
 router.get('/messages/unread', requireAuth, route(messages.unread));
 router.delete('/messages/:messageId', requireAuth, writeLimiter, route(messages.removeMessage));
 router.post('/messages/conversations/:username', requireAuth, writeLimiter, route(messages.openConversation));
+router.post('/messages/share', requireAuth, writeLimiter, route(messages.sharePost));
 router.get('/messages/conversations/:id', requireAuth, route(messages.messages));
 router.post('/messages/conversations/:id/read', requireAuth, route(messages.markRead));
 
 router.get('/stories', requireAuth, route(stories.list));
 router.post('/stories', requireAuth, uploadIpLimiter, uploadAccountLimiter, writeLimiter, upload.single('media'), route(stories.create));
+router.get('/close-friends', requireAuth, route(closeFriends.list));
+router.get('/close-friends/candidates', requireAuth, route(closeFriends.candidates));
+router.post('/close-friends/:username/toggle', requireAuth, writeLimiter, route(closeFriends.toggle));
 router.post('/stories/:id/view', requireAuth, route(stories.view));
+router.post('/stories/:id/reply', requireAuth, writeLimiter, route(stories.reply));
+router.post('/messages/:messageId/reactions', requireAuth, writeLimiter, route(messages.toggleReaction));
 router.delete('/stories/:id', requireAuth, writeLimiter, route(stories.remove));
 router.get('/stories/:id/viewers', requireAuth, route(stories.viewers));
 router.get('/reels', maybeAuth, route(reels.list));
+router.get('/reels/feed', requireAuth, readLimiter, route(reels.feed));
 router.post('/reels', requireAuth, uploadIpLimiter, uploadAccountLimiter, writeLimiter, upload.single('media'), route(reels.create));
+router.post('/reco/events', requireAuth, recoLimiter, route(reco.ingestEvents));
+router.patch('/users/me/reco-settings', requireAuth, writeLimiter, route(recoSettings.updateSettings));
+router.post('/reco/reset', requireAuth, writeLimiter, route(recoSettings.resetHistory));
 
 module.exports = router;

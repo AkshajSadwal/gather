@@ -7,3 +7,4 @@
 - Add email verification and account recovery.
 - Configure TURN for restrictive NAT/firewall paths.
 - Add distributed Socket.IO, presence, and call coordination before running multiple backend instances.
+

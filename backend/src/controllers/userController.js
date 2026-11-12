@@ -3,6 +3,7 @@ const prisma = require('../config/prisma');
 const { normalizeUsername } = require('../utils/normalize');
 const { HttpError, ok } = require('../utils/http');
 const { createNotification } = require('../services/notifications');
+const { logReelEvent } = require('../services/recoEvents');
 const { persistUpload, removeLocal } = require('../services/storage');
 const { getBlockState, isBlockedBetween, getBlockedUserIds } = require('../services/blocks');
 
@@ -32,8 +33,8 @@ async function profile(req, res) {
   const [followersCount, followingCount, postsCount, posts] = await Promise.all([
     prisma.follow.count({ where: { followedId: user.id, accepted: true } }),
     prisma.follow.count({ where: { followerId: user.id, accepted: true } }),
-    prisma.post.count({ where: { authorId: user.id } }),
-    canView ? prisma.post.findMany({ where: { authorId: user.id }, orderBy: { createdAt: 'desc' }, take: 24, include: { author: { select: { id: true, username: true, image: true, profile: true } }, media: { orderBy: { position: 'asc' } }, likes: { where: { userId: req.user?.id || '__visitor__' }, select: { id: true }, take: 1 }, bookmarks: { where: { userId: req.user?.id || '__visitor__' }, select: { id: true }, take: 1 }, _count: { select: { likes: true, comments: true } } } }) : Promise.resolve([])
+    prisma.post.count({ where: { authorId: user.id, archivedAt: null } }),
+    canView ? prisma.post.findMany({ where: { authorId: user.id, archivedAt: null }, orderBy: [{ pinnedAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }], take: 24, include: { author: { select: { id: true, username: true, image: true, profile: true } }, media: { orderBy: { position: 'asc' } }, likes: { where: { userId: req.user?.id || '__visitor__' }, select: { id: true }, take: 1 }, bookmarks: { where: { userId: req.user?.id || '__visitor__' }, select: { id: true }, take: 1 }, _count: { select: { likes: true, comments: true } } } }) : Promise.resolve([])
   ]);
   const shapedPosts = posts.map((post) => ({ ...post, isLiked: post.likes.length > 0, isBookmarked: post.bookmarks.length > 0, likes: undefined, bookmarks: undefined }));
   return ok(res, { user: { ...user, followers: undefined, _count: { followers: followersCount, following: followingCount, posts: postsCount }, isSelf, isFollowing, isFollowPending, canView, isBlocked: blockState.blocked, isBlockedBy: blockState.blockedBy, isMuted: Boolean(mute) }, posts: shapedPosts });
@@ -97,6 +98,7 @@ async function follow(req, res) {
   const existing = await prisma.follow.findUnique({ where: { followerId_followedId: { followerId: req.user.id, followedId: target.id } } });
   if (existing) {
     await prisma.follow.delete({ where: { id: existing.id } });
+    if (existing.accepted) logReelEvent({ userId: req.user.id, creatorId: target.id, type: 'CREATOR_UNFOLLOW', impressionId: req.get('x-reco-impression-id') || undefined });
     await prisma.notification.deleteMany({
       where: {
         recipientId: target.id,
@@ -111,6 +113,7 @@ async function follow(req, res) {
   const relation = await prisma.follow.create({
     data: { followerId: req.user.id, followedId: target.id, accepted: !pending }
   });
+  if (!pending) logReelEvent({ userId: req.user.id, creatorId: target.id, type: 'CREATOR_FOLLOW', impressionId: req.get('x-reco-impression-id') || undefined });
   await createNotification({
     recipientId: target.id,
     actorId: req.user.id,
@@ -186,7 +189,9 @@ async function toggleBlock(req, res) {
         { followerId: target.id, followedId: req.user.id }
       ] }
     });
+    await tx.closeFriend.deleteMany({ where: { OR: [{ ownerId: req.user.id, friendId: target.id }, { ownerId: target.id, friendId: req.user.id }] } });
   });
+  logReelEvent({ userId: req.user.id, creatorId: target.id, type: 'CREATOR_BLOCK' });
   return ok(res, { blocked: true, username: target.username });
 }
 
@@ -206,8 +211,8 @@ async function search(req, res) {
   const blockedIds = await getBlockedUserIds(req.user?.id);
   const [users, hashtags, posts] = await Promise.all([
     prisma.user.findMany({ where: { id: { notIn: blockedIds }, OR: [{ username: { contains: query.toLowerCase() } }, { profile: { displayName: { contains: query, mode: 'insensitive' } } }] }, take: 12, select: { id: true, username: true, image: true, profile: true } }),
-    prisma.hashtag.findMany({ where: { tag: { contains: query.toLowerCase() } }, take: 8, include: { _count: { select: { posts: true } } } }),
-    prisma.post.findMany({ where: { authorId: { notIn: blockedIds }, caption: { contains: query, mode: 'insensitive' }, author: { is: { profile: { is: { visibility: 'PUBLIC' } } } } }, take: 12, orderBy: { createdAt: 'desc' }, include: { media: { take: 1, orderBy: { position: 'asc' } }, author: { select: { username: true, image: true } }, _count: { select: { likes: true, comments: true } } } })
+    prisma.hashtag.findMany({ where: { tag: { contains: query.toLowerCase() }, posts: { some: { post: { is: { archivedAt: null } } } } }, take: 8, include: { _count: { select: { posts: { where: { post: { is: { archivedAt: null } } } } } } } }),
+    prisma.post.findMany({ where: { authorId: { notIn: blockedIds }, archivedAt: null, caption: { contains: query, mode: 'insensitive' }, author: { is: { profile: { is: { visibility: 'PUBLIC' } } } } }, take: 12, orderBy: { createdAt: 'desc' }, include: { media: { take: 1, orderBy: { position: 'asc' } }, author: { select: { username: true, image: true } }, _count: { select: { likes: true, comments: true } } } })
   ]);
   return ok(res, { users, hashtags, posts });
 }

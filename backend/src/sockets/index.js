@@ -51,7 +51,7 @@ function createSocketServer(server, frontendUrl, database = prisma) {
         if (!member) return ack({ error: { code: 'FORBIDDEN', message: 'You are not a participant in this conversation.' } });
         const other = await database.conversationParticipant.findFirst({ where: { conversationId, userId: { not: userId } }, select: { userId: true } });
         if (other && await isBlockedBetween(userId, other.userId)) return ack({ error: { code: 'BLOCKED', message: 'You cannot message this account.' } });
-        const message = await database.message.create({ data: { conversationId, senderId: userId, body }, include: { sender: { select: { id: true, username: true, image: true } } } });
+        const message = await database.message.create({ data: { conversationId, senderId: userId, body }, include: { sender: { select: { id: true, username: true, image: true } }, reactions: true, reads: true } });
         await database.conversation.update({ where: { id: conversationId }, data: { updatedAt: new Date() } });
         const recipients = await database.conversationParticipant.findMany({ where: { conversationId, userId: { not: userId } }, select: { userId: true } });
         const delivered = recipients.some((recipient) => onlineSockets.has(recipient.userId));

@@ -5,26 +5,34 @@ const { reportSchema } = require('../utils/reportSchema');
 const { assertPostVisible } = require('./postController');
 const { isBlockedBetween } = require('../services/relations');
 const { reviewReport, listModerationHistory } = require('../services/moderationService');
+const { logPostReelEvent, logReelEvent } = require('../services/recoEvents');
 
 async function create(req, res) {
   const parsed = reportSchema.safeParse(req.body);
   if (!parsed.success) throw new HttpError(400, 'VALIDATION_ERROR', 'Choose a visible target and a reason.', parsed.error.flatten().fieldErrors);
   const { targetType, targetId, reason, details } = parsed.data;
+  let reportedCreatorId = null;
+  let reportedPostId = null;
 
   if (targetType === 'USER') {
     const target = await prisma.user.findUnique({ where: { id: targetId }, select: { id: true } });
     if (!target || await isBlockedBetween(req.user.id, target.id)) throw new HttpError(404, 'USER_NOT_FOUND', 'That account could not be found.');
     if (target.id === req.user.id) throw new HttpError(400, 'CANNOT_REPORT_SELF', 'You cannot report your own account.');
+    reportedCreatorId = target.id;
   } else if (targetType === 'POST') {
-    const post = await prisma.post.findUnique({ where: { id: targetId }, select: { id: true, authorId: true } });
+    const post = await prisma.post.findUnique({ where: { id: targetId }, select: { id: true, authorId: true, archivedAt: true } });
     if (!post) throw new HttpError(404, 'POST_NOT_FOUND', 'That post could not be found.');
     if (post.authorId === req.user.id) throw new HttpError(400, 'CANNOT_REPORT_SELF', 'You cannot report your own post.');
     await assertPostVisible(post, req.user.id);
+    reportedCreatorId = post.authorId;
+    reportedPostId = post.id;
   } else {
-    const comment = await prisma.comment.findUnique({ where: { id: targetId }, select: { id: true, userId: true, post: { select: { id: true, authorId: true } } } });
+    const comment = await prisma.comment.findUnique({ where: { id: targetId }, select: { id: true, userId: true, post: { select: { id: true, authorId: true, archivedAt: true } } } });
     if (!comment) throw new HttpError(404, 'COMMENT_NOT_FOUND', 'That comment could not be found.');
     if (comment.userId === req.user.id) throw new HttpError(400, 'CANNOT_REPORT_SELF', 'You cannot report your own comment.');
     await assertPostVisible(comment.post, req.user.id);
+    reportedCreatorId = comment.post.authorId;
+    reportedPostId = comment.post.id;
   }
 
   const key = { reporterId: req.user.id, targetType, targetId };
@@ -33,6 +41,8 @@ async function create(req, res) {
 
   try {
     const report = await prisma.report.create({ data: { ...key, reason, details: details || null }, select: { id: true, status: true } });
+    if (reportedPostId) logPostReelEvent(req.user.id, reportedPostId, 'REPORT');
+    if (reportedCreatorId && !reportedPostId) logReelEvent({ userId: req.user.id, creatorId: reportedCreatorId, type: 'REPORT' });
     return ok(res, { report, alreadyReported: false }, 201);
   } catch (error) {
     if (error?.code !== 'P2002') throw error;

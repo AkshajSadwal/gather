@@ -19,5 +19,6 @@ prisma/dev.db
 /playwright-report/
 minio.license
 /CODEX_PROGRESS.md
+/exports/
 *.dump
 /recovered.png

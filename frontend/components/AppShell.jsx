@@ -128,8 +128,8 @@ export default function AppShell({ children, right = false }) {
     const action = notificationActions[item.id];
     const busy = Boolean(notificationBusy[item.id]);
     const isRequest = item.type === 'FOLLOW_REQUEST';
-    const isPostActivity = ['LIKE', 'COMMENT', 'MENTION', 'REPLY'].includes(item.type);
-    const targetHref = isPostActivity && item.entityId
+    const isPostActivity = ['LIKE', 'COMMENT', 'COMMENT_LIKE', 'MENTION', 'REPLY'].includes(item.type);
+    const targetHref = item.type === 'STORY_REPLY' ? '/messages' : isPostActivity && item.entityId
       ? `/post/${item.entityId}`
       : item.actor?.username ? `/profile/${item.actor.username}` : '/';
 
@@ -141,7 +141,7 @@ export default function AppShell({ children, right = false }) {
           onClick={() => { void markNotificationAsRead(item); setNotificationsOpen(false); }}
           className="min-w-0 flex-1 text-left text-sm"
         >
-          <p><b>{item.actor?.username || 'Someone'}</b> {item.type === 'FOLLOW' ? 'started following you' : isRequest ? 'requested to follow you' : item.type === 'LIKE' ? 'liked your post' : item.type === 'COMMENT' ? 'commented on your post' : item.type === 'REPLY' ? 'replied to your comment' : item.type === 'MENTION' ? 'mentioned you' : 'viewed your story'}</p>
+          <p><b>{item.actor?.username || 'Someone'}</b> {item.type === 'FOLLOW' ? 'started following you' : isRequest ? 'requested to follow you' : item.type === 'LIKE' ? 'liked your post' : item.type === 'COMMENT_LIKE' ? 'liked your comment' : item.type === 'COMMENT' ? 'commented on your post' : item.type === 'REPLY' ? 'replied to your comment' : item.type === 'MENTION' ? 'mentioned you' : item.type === 'STORY_REPLY' ? 'replied to your story' : 'viewed your story'}</p>
           {!item.readAt && !action && <span className="mt-1 inline-block h-2 w-2 rounded-full bg-coral" />}
         </Link>
       </div>

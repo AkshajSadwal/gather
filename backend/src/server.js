@@ -5,12 +5,14 @@ const { port, frontendUrl } = require('./config/env');
 const { ensureBucket } = require('./services/minio');
 const { cleanupTempUploads } = require('./services/storage');
 const { startCleanup, stopCleanup } = require('./services/cleanup');
+const { startFeatureRecompute, stopFeatureRecompute } = require('./services/recoFeatures');
 const { createSocketServer } = require('./sockets');
 
 const server = http.createServer(app);
 const io = createSocketServer(server, frontendUrl);
 let cleanupTimer = null;
-Promise.all([io.callService.ready, ensureBucket(), cleanupTempUploads()]).then(() => { cleanupTimer = startCleanup(); server.listen(port, () => console.log(`Gather backend listening on http://localhost:${port}`)); }).catch((error) => {
+let recoFeaturesTimer = null;
+Promise.all([io.callService.ready, ensureBucket(), cleanupTempUploads()]).then(() => { cleanupTimer = startCleanup(); recoFeaturesTimer = startFeatureRecompute(); server.listen(port, () => console.log(`Gather backend listening on http://localhost:${port}`)); }).catch((error) => {
   console.error('[startup] mediasoup or MinIO initialization failed; backend will not accept traffic.', error);
   process.exitCode = 1;
   io.callService.close().finally(() => prisma.$disconnect());
@@ -21,6 +23,7 @@ async function shutdown(signal, exitCode = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
   stopCleanup(cleanupTimer);
+  stopFeatureRecompute(recoFeaturesTimer);
   console.log(`Received ${signal}; closing server.`);
   const force = setTimeout(() => { console.error('Shutdown timed out.'); process.exit(1); }, 10000);
   force.unref();

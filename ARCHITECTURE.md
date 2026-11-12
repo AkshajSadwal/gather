@@ -107,3 +107,19 @@ The current design intentionally supports one backend instance. Presence, busy-c
 ## Kubernetes packaging
 
 The repository includes container images and a Kubernetes baseline. The backend remains a single replica because mediasoup rooms, active calls, presence, and busy-user state are process-local. The backend uses `hostNetwork` for direct mediasoup RTC port binding; `MEDIASOUP_ANNOUNCED_ADDRESS` must be browser-reachable. PostgreSQL and MinIO are represented as single-replica StatefulSets with persistent volumes for local/small deployments; serious production should prefer managed HA database/object storage.
+
+## Round 4 social features
+
+Posts can be pinned (up to three per owner) or archived. Archived posts are excluded from public grids, feeds, discovery, tags, saved posts, reels, search, and shared-post previews; owners can view and restore their own archive. Top-level comments support likes and one post-owner pin, with viewer like state and counts loaded in bounded page queries.
+
+Close Friends membership is stored per owner/target pair. Story audience checks are applied in the story list, view tracking, and media authorization. A membership change or block takes effect immediately; blocking removes Close Friends rows in both directions. Close-friends stories use a distinct green ring.
+
+Story replies become direct messages that retain a short story caption preview after the story expires. Message reactions are persisted per message/user and broadcast as participant-scoped `message:reaction` updates. Sharing a post or reel creates one linked message per selected recipient; recipient payloads are shaped against current block, archive, and private-account visibility, and unavailable posts return a placeholder.
+
+## Round 5 recommendations and moderation
+
+Block and mute relations are account-to-account rows with indexes in both directions. Blocks remove follow and Close Friends relations and are enforced across content, messaging, media, and calls; mutes filter feed, reels, and stories without notifying the muted account. Reports are unique per reporter/target and remain queued for admin review; user-facing report creation exists, while broader moderation tooling remains follow-up work.
+
+Reel recommendation serving is behind a provider interface (`services/recommender`) with `heuristic_v0` as the default. It filters private, archived, blocked, muted, and recently served reels, applies a two-per-creator cap, and records viewer-owned impressions only when personalization is enabled. Event ingestion is idempotent, event payloads are bounded, and affinity scores decay with a 14-day half-life. Grouped feature snapshots run on a configurable timer. Reset deletes viewer activity and affinities; account erasure cascades viewer-owned data. Cleanup removes expired stories, temporary uploads, old read notifications, and recommendation events/impressions according to retention settings.
+
+Training export streams seen impressions in cursor batches, excludes currently opted-out users and rows older than a later reset, replaces database identifiers with stable opaque IDs, and includes aggregate reel stats only from before the served day. Behavior labels are derived at export time; model-specific label mapping is pending until ranker heads are defined.

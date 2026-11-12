@@ -15,15 +15,21 @@ async function canViewAuthor(authorId, visibility, userId) {
 
 async function authorizeMediaReference(reference, userId, admin = false) {
   const [posts, stories, reels, avatar] = await Promise.all([
-    prisma.postMedia.findMany({ where: { url: reference }, select: { post: { select: { id: true, authorId: true, author: { select: { profile: { select: { visibility: true } } } } } } } }),
-    prisma.storyMedia.findMany({ where: { url: reference }, select: { story: { select: { authorId: true, expiresAt: true, author: { select: { profile: { select: { visibility: true } } } } } } } }),
-    prisma.reelMedia.findMany({ where: { url: reference }, select: { reel: { select: { authorId: true, author: { select: { profile: { select: { visibility: true } } } } } } } }),
+    prisma.postMedia.findMany({ where: { url: reference }, select: { post: { select: { id: true, authorId: true, archivedAt: true, author: { select: { profile: { select: { visibility: true } } } } } } } }),
+    prisma.storyMedia.findMany({ where: { url: reference }, select: { story: { select: { authorId: true, audience: true, expiresAt: true, author: { select: { profile: { select: { visibility: true } } } } } } } }),
+    prisma.reelMedia.findMany({ where: { url: reference }, select: { reel: { select: { authorId: true, post: { select: { archivedAt: true } }, author: { select: { profile: { select: { visibility: true } } } } } } } }),
     prisma.user.findFirst({ where: { OR: [{ image: reference }, { profile: { is: { avatarUrl: reference } } }] }, select: { id: true, profile: { select: { visibility: true } } } })
   ]);
   const checks = [
-    ...posts.map(async (entry) => (await canViewAuthor(entry.post.authorId, entry.post.author.profile?.visibility, userId)) || (admin && Boolean(await prisma.report.findFirst({ where: { targetType: 'POST', targetId: entry.post.id, status: 'OPEN' }, select: { id: true } })))),
-    ...stories.map((entry) => entry.story.expiresAt > new Date() && canViewAuthor(entry.story.authorId, entry.story.author.profile?.visibility, userId)),
-    ...reels.map((entry) => canViewAuthor(entry.reel.authorId, entry.reel.author.profile?.visibility, userId)),
+    ...posts.map(async (entry) => ((entry.post.archivedAt === null || entry.post.authorId === userId) && await canViewAuthor(entry.post.authorId, entry.post.author.profile?.visibility, userId)) || (admin && Boolean(await prisma.report.findFirst({ where: { targetType: 'POST', targetId: entry.post.id, status: 'OPEN' }, select: { id: true } })))),
+    ...stories.map(async (entry) => {
+      if (entry.story.expiresAt <= new Date()) return false;
+      if (entry.story.audience === 'CLOSE_FRIENDS' && entry.story.authorId !== userId) {
+        if (!userId || !await prisma.closeFriend.findUnique({ where: { ownerId_friendId: { ownerId: entry.story.authorId, friendId: userId } }, select: { id: true } })) return false;
+      }
+      return canViewAuthor(entry.story.authorId, entry.story.author.profile?.visibility, userId);
+    }),
+    ...reels.map((entry) => (entry.reel.post?.archivedAt == null || entry.reel.authorId === userId) && canViewAuthor(entry.reel.authorId, entry.reel.author.profile?.visibility, userId)),
     ...(avatar ? [canViewAuthor(avatar.id, avatar.profile?.visibility, userId)] : [])
   ];
   if (!checks.length) return { exists: false, allowed: false };

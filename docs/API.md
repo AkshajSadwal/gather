@@ -121,3 +121,31 @@ RTP audio/video is carried by mediasoup WebRTC transports, not Socket.IO.
 ### Media delivery
 
 `GET /api/media?key=<encoded s3://bucket/object-key>` validates the authenticated viewer's access to a media object and responds with a short-lived redirect to the private MinIO/S3-compatible object. New image/video clients should use the `url` returned by APIs through the frontend `mediaUrl()` helper rather than constructing object-storage URLs themselves.
+
+### Comment likes and pinning
+- `POST /comments/:commentId/like` — authenticated and rate limited; toggles a comment like, returns `{ liked, count }`, and notifies the author with a deduplicated `COMMENT_LIKE` notification.
+- `POST /comments/:commentId/pin` — authenticated and rate limited; post owner toggles one top-level pinned comment per post. Pinning a different comment replaces the existing pin.
+- Comment pages include `likeCount` and `likedByMe` without per-comment queries.
+
+### Close Friends stories
+- `GET /close-friends` — authenticated; returns the viewer's members.
+- `GET /close-friends/candidates?q=` — authenticated; returns up to 50 unblocked followers or followed accounts matching the optional username query.
+- `POST /close-friends/:username/toggle` — authenticated and rate limited; toggles membership. The target must follow the viewer or be followed by the viewer.
+- `POST /stories` accepts optional `audience` (`EVERYONE` or `CLOSE_FRIENDS`, default `EVERYONE`). Story lists, view tracking, and media access enforce the audience.
+
+### Story replies and message reactions
+- `POST /stories/:id/reply` with `{ text }` — authenticated and rate limited; verifies story visibility, then sends a message into the sender/owner direct conversation.
+- `POST /messages/:messageId/reactions` with `{ emoji }` — authenticated and rate limited; participants can toggle one supported emoji per message. Reactions are included with message pages and broadcast to participants.
+- Socket `message:reaction` broadcasts `{ conversationId, messageId, userId, emoji }`; `emoji` is `null` when the reaction is removed.
+- Socket `message:new` delivers story replies and shared-post messages. Story replies use notification type `STORY_REPLY` and link to Messages.
+
+### Sharing posts and reels in Messages
+- `GET /messages/share-recipients?q=` — authenticated and rate limited; searches up to 50 unblocked accounts the viewer follows or has previously messaged.
+- `POST /messages/share` with `{ postId, recipientUsernames, note? }` — authenticated and rate limited; sends a linked message to one to five distinct recipients after sender post visibility and recipient message-access checks. Readers receive a compact safe preview or an unavailable placeholder.
+
+### Reel recommendation events
+- `POST /reco/events` — authenticated, limited to 120 requests per minute, accepts `{ events: [...] }` with up to 50 client events per request. Each event requires a unique `eventId`, client event `type`, and `reelId`; optional fields are `impressionId`, `sessionId`, `occurredAt`, `payload`, and `appVersion`. Returns accepted, duplicate, and rejected counts. Events for disabled personalization, inaccessible reels, or impressions owned by another user are not stored.
+- `GET /reels/feed?size=10&sessionId=&exclude=` — authenticated and rate limited; returns `{ requestId, modelVersion, items }` with normal reel payloads plus `impressionId`, `position`, and `candidateSource`. Each served item creates a viewer-owned impression. `/reels` remains available for anonymous and legacy clients.
+- `PATCH /users/me/reco-settings` with `{ personalizedRecs: boolean }` — authenticated; updates the account's recommendation personalization preference.
+- `POST /reco/reset` — authenticated; deletes the caller's recommendation events, impressions, creator affinities, and feature snapshot and records a reset timestamp.
+- Reel like, save, comment, follow, and message-share writes may carry `X-Reco-Impression-Id` to associate the server-recorded engagement with the feed impression. The header never grants access to the referenced reel.

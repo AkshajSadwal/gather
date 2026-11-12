@@ -13,7 +13,7 @@ async function list(req, res) {
   const blocked = await getBlockedUserIds(req.user?.id);
   const muted = await mutedIdsFor(req.user?.id);
   const hidden = [...new Set([...blocked, ...muted])];
-  const where = { authorId: { notIn: hidden }, hashtags: { some: { hashtag: { tag } } }, author: { is: { profile: { is: { visibility: 'PUBLIC' } } } } };
+  const where = { authorId: { notIn: hidden }, archivedAt: null, hashtags: { some: { hashtag: { tag } } }, author: { is: { profile: { is: { visibility: 'PUBLIC' } } } } };
   if (parsed.data.cursor) {
     const cursor = await prisma.post.findFirst({ where: { id: parsed.data.cursor, ...where }, select: { id: true, createdAt: true } });
     if (!cursor) throw new HttpError(400, 'INVALID_CURSOR', 'That hashtag page cursor is invalid.');
