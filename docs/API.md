@@ -149,3 +149,7 @@ RTP audio/video is carried by mediasoup WebRTC transports, not Socket.IO.
 - `PATCH /users/me/reco-settings` with `{ personalizedRecs: boolean }` — authenticated; updates the account's recommendation personalization preference.
 - `POST /reco/reset` — authenticated; deletes the caller's recommendation events, impressions, creator affinities, and feature snapshot and records a reset timestamp.
 - Reel like, save, comment, follow, and message-share writes may carry `X-Reco-Impression-Id` to associate the server-recorded engagement with the feed impression. The header never grants access to the referenced reel.
+
+### Media upload validation
+- Post, story, and reel upload endpoints continue to use the existing authenticated upload routes and limits.
+- Uploads are accepted only when the file signature matches the declared supported image/video MIME type. Mismatches return `400 INVALID_MEDIA_CONTENT` and temporary files are removed.

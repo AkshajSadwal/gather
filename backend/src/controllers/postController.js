@@ -5,8 +5,26 @@ const { persistUpload, removeLocal } = require('../services/storage');
 const { createNotification } = require('../services/notifications');
 const { logPostReelEvent } = require('../services/recoEvents');
 const { getBlockState, isBlockedBetween, getBlockedUserIds } = require('../services/blocks');
-const { blockedIdsFor } = require('../services/relations');
+const { blockedIdsFor, mutedIdsFor } = require('../services/relations');
 const { deletePostContent } = require('../services/contentService');
+
+let postFeedDependencies = { prisma, getBlockedUserIds, mutedIdsFor };
+
+function setPostFeedDependenciesForTests(overrides = {}) {
+  postFeedDependencies = { prisma, getBlockedUserIds, mutedIdsFor, ...overrides };
+}
+
+function resetPostFeedDependenciesForTests() {
+  postFeedDependencies = { prisma, getBlockedUserIds, mutedIdsFor };
+}
+
+async function hiddenPostAuthorIds(userId) {
+  const [blockedIds, mutedIds] = await Promise.all([
+    postFeedDependencies.getBlockedUserIds(userId),
+    postFeedDependencies.mutedIdsFor(userId)
+  ]);
+  return [...new Set([...blockedIds, ...mutedIds])];
+}
 
 const postInclude = (userId) => ({
   author: { select: { id: true, username: true, image: true, profile: { select: { displayName: true, avatarUrl: true } } } },
@@ -46,9 +64,8 @@ async function assertPostVisible(post, userId) {
 
 async function feed(req, res) {
   const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 30);
-  const blockedIds = await getBlockedUserIds(req.user.id);
-  const hiddenIds = [...new Set([...blockedIds, ...await mutedIdsFor(req.user.id)])];
-  const following = await prisma.follow.findMany({
+  const hiddenIds = await hiddenPostAuthorIds(req.user.id);
+  const following = await postFeedDependencies.prisma.follow.findMany({
     where: {
       followerId: req.user.id,
       accepted: true,
@@ -57,7 +74,7 @@ async function feed(req, res) {
     select: { followedId: true }
   });
   const authorIds = [...following.map((row) => row.followedId), req.user.id];
-  const posts = await prisma.post.findMany({
+  const posts = await postFeedDependencies.prisma.post.findMany({
     where: { authorId: { in: authorIds, notIn: hiddenIds }, archivedAt: null },
     orderBy: { createdAt: 'desc' },
     take: limit + 1,
@@ -73,19 +90,17 @@ async function explore(req, res) {
   if (req.query.sort === 'popular') {
     const parsed = z.object({ page: z.coerce.number().int().min(1).max(10).default(1) }).safeParse(req.query);
     if (!parsed.success) throw new HttpError(400, 'VALIDATION_ERROR', 'Choose a popular page from 1 to 10.');
-    const blockedIds = await getBlockedUserIds(req.user?.id);
-    const hiddenIds = [...new Set([...blockedIds, ...await mutedIdsFor(req.user?.id)])];
+    const hiddenIds = await hiddenPostAuthorIds(req.user?.id);
     const where = { createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }, archivedAt: null, authorId: { notIn: hiddenIds }, author: { is: { profile: { is: { visibility: 'PUBLIC' } } } } };
     const [posts, total] = await Promise.all([
-      prisma.post.findMany({ where, orderBy: [{ likes: { _count: 'desc' } }, { id: 'desc' }], skip: (parsed.data.page - 1) * 12, take: 12, include: postInclude(req.user?.id || '__visitor__') }),
-      prisma.post.count({ where })
+      postFeedDependencies.prisma.post.findMany({ where, orderBy: [{ likes: { _count: 'desc' } }, { id: 'desc' }], skip: (parsed.data.page - 1) * 12, take: 12, include: postInclude(req.user?.id || '__visitor__') }),
+      postFeedDependencies.prisma.post.count({ where })
     ]);
     return ok(res, { posts: posts.map(shapePost), page: parsed.data.page, totalPages: Math.max(1, Math.min(10, Math.ceil(total / 12))) });
   }
   const limit = Math.min(Math.max(Number(req.query.limit) || 12, 1), 30);
-  const blockedIds = await getBlockedUserIds(req.user?.id);
-  const hiddenIds = [...new Set([...blockedIds, ...await mutedIdsFor(req.user?.id)])];
-  const posts = await prisma.post.findMany({
+  const hiddenIds = await hiddenPostAuthorIds(req.user?.id);
+  const posts = await postFeedDependencies.prisma.post.findMany({
     where: {
       archivedAt: null,
       authorId: { notIn: hiddenIds },
@@ -396,4 +411,4 @@ async function toggleCommentPin(req, res) {
   return ok(res, { pinned: Boolean(pinnedAt), pinnedAt });
 }
 
-module.exports = { feed, explore, create, detail, remove, archived, togglePin, toggleArchive, saved, updateCaption, toggleLike, toggleBookmark, listComments, listReplies, createComment, deleteComment, toggleCommentLike, toggleCommentPin, assertPostVisible };
+module.exports = { feed, explore, create, detail, remove, archived, togglePin, toggleArchive, saved, updateCaption, toggleLike, toggleBookmark, listComments, listReplies, createComment, deleteComment, toggleCommentLike, toggleCommentPin, assertPostVisible, setPostFeedDependenciesForTests, resetPostFeedDependenciesForTests };

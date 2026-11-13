@@ -30,6 +30,15 @@ const storage = {
 };
 if (!storage.endpoint.startsWith('http://') && !storage.endpoint.startsWith('https://')) throw new Error('MINIO_ENDPOINT must be an http(s) URL.');
 
+if (process.env.NODE_ENV === 'production') {
+  if (!process.env.AUTH_SECRET || process.env.AUTH_SECRET.length < 32) throw new Error('AUTH_SECRET must be explicitly configured with at least 32 characters in production.');
+  if (!process.env.INTERNAL_AUTH_SECRET || process.env.INTERNAL_AUTH_SECRET.length < 32 || process.env.INTERNAL_AUTH_SECRET === process.env.AUTH_SECRET) throw new Error('INTERNAL_AUTH_SECRET must be a separate, explicit secret with at least 32 characters in production.');
+  if (!process.env.FRONTEND_URL || !/^https:\/\//i.test(process.env.FRONTEND_URL)) throw new Error('FRONTEND_URL must be explicitly configured as an HTTPS origin in production.');
+  if (storage.enabled && (!process.env.MINIO_ENDPOINT || !process.env.MINIO_ACCESS_KEY || !process.env.MINIO_SECRET_KEY || !process.env.MINIO_BUCKET)) {
+    throw new Error('MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, and MINIO_BUCKET must be explicitly configured when production storage is enabled.');
+  }
+}
+
 if (!Number.isInteger(mediasoup.rtcMinPort) || !Number.isInteger(mediasoup.rtcMaxPort) || mediasoup.rtcMinPort < 1024 || mediasoup.rtcMaxPort <= mediasoup.rtcMinPort) {
   throw new Error('MEDIASOUP_RTC_MIN_PORT and MEDIASOUP_RTC_MAX_PORT must define a valid inclusive port range.');
 }
