@@ -488,7 +488,7 @@ export default function MediasoupCallOverlay({ socket, conversation, currentUser
 
   return <>
     {controlsTarget && conversation && !view.call && createPortal(<><button title="Voice call" aria-label="Start voice call" onClick={() => startCall('VOICE')} className="rounded-full p-2.5 text-ink/60 hover:bg-paper hover:text-moss"><Phone size={18} /></button><button title="Video call" aria-label="Start video call" onClick={() => startCall('VIDEO')} className="rounded-full p-2.5 text-ink/60 hover:bg-paper hover:text-moss"><Video size={19} /></button></>, controlsTarget)}
-    {view.call && <div role="dialog" aria-modal="true" aria-label={`${view.call.type.toLowerCase()} call`} className="fixed inset-0 z-[70] grid place-items-center bg-[#0c1713]/95 p-3 text-white sm:p-8">
+    {view.call && typeof document !== 'undefined' && createPortal(<div role="dialog" aria-modal="true" aria-label={`${view.call.type.toLowerCase()} call`} className="fixed inset-0 z-[70] grid place-items-center bg-[#0c1713]/95 p-3 text-white sm:p-8">
       <div className="absolute right-5 top-5 flex items-center gap-2"><span className="h-2 w-2 animate-pulse rounded-full bg-[#91d8ac]" /><span className="text-xs uppercase tracking-[.2em] text-white/60">{phase}</span><button aria-label="Close call window" onClick={hangup} className="ml-2 rounded-full bg-white/10 p-2"><X size={18} /></button></div>
       <div className="relative h-[min(80vh,760px)] w-full max-w-4xl overflow-hidden rounded-[30px] bg-[#21352c]">
         {view.call.type === 'VIDEO' && view.remoteStream?.getVideoTracks().length > 0 && <video ref={remoteVideo} autoPlay muted playsInline className="h-full w-full object-cover" />}
@@ -500,6 +500,6 @@ export default function MediasoupCallOverlay({ socket, conversation, currentUser
         </div>
       </div>
       <p className="mt-4 max-w-lg text-center text-xs leading-5 text-white/35">Gather routes live audio and video through a mediasoup SFU. Your browser controls camera and microphone permissions.</p>
-    </div>}
+    </div>, document.body)}
   </>;
 }

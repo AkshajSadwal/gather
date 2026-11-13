@@ -10,6 +10,10 @@ module.exports = {
         paper: 'var(--paper)',
         surface: 'var(--surface)',
         'surface-raised': 'var(--surface-raised)',
+        glass: 'var(--glass)',
+        'glass-strong': 'var(--glass-strong)',
+        'glass-floating': 'var(--glass-strong)',
+        'glass-border': 'var(--glass-border)',
         coral: 'var(--coral)',
         line: 'var(--line)'
       },

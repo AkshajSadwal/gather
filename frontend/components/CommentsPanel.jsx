@@ -130,7 +130,7 @@ export default function CommentsPanel({ postId, postAuthorId, onCommentAdded, re
 
   return <section aria-label="Comments" className="grid gap-4">
     <div className="max-h-[55vh] min-h-20 space-y-4 overflow-y-auto pr-1">
-      {loading ? <p className="py-8 text-center text-sm text-ink/50">Loading comments…</p> : error ? <div role="alert" className="py-6 text-center text-sm text-coral">{error} <button type="button" onClick={() => void loadComments()} className="underline">Retry</button></div> : comments.length ? comments.map((item) => renderComment(item)) : <p className="py-8 text-center text-sm text-ink/50">No comments yet. Be the first to comment.</p>}
+      {loading ? <p className="py-8 text-center text-sm text-ink/50">Loading comments…</p> : error ? <div role="alert" className="py-6 text-center text-sm text-coral">{error} <button type="button" onClick={() => void loadComments()} className="underline">Retry</button></div> : comments.length ? comments.map((item) => renderComment(item)) : <p className="py-8 text-center text-sm text-ink/50">No comments yet.</p>}
     </div>
     {!loading && nextCursor && <button type="button" disabled={loadingMore} onClick={() => void loadComments(nextCursor)} className="mx-auto text-xs font-semibold text-moss disabled:opacity-50">{loadingMore ? 'Loading…' : 'Load more comments'}</button>}
     {status === 'authenticated' ? <form onSubmit={submit} className="grid gap-2 border-t border-line pt-3">
