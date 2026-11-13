@@ -157,25 +157,12 @@ async function detail(req, res) {
   return ok(res, { post: shapePost(post) });
 }
 
-let postDeleteAuthObserverForTests = null;
-
 async function remove(req, res) {
   const post = await prisma.post.findUnique({ where: { id: req.params.id }, select: { id: true, authorId: true } });
   if (!post) throw new HttpError(404, 'POST_NOT_FOUND', 'That post could not be found.');
-  const isOwner = Boolean(req.user?.id) && post.authorId === req.user.id;
-  postDeleteAuthObserverForTests?.({ postId: post.id, postAuthorId: post.authorId, postAuthorIdType: typeof post.authorId, userId: req.user?.id ?? null, userIdType: typeof req.user?.id, isOwner });
-  if (!isOwner) throw new HttpError(403, 'FORBIDDEN', 'You can only delete your own posts.');
+  if (post.authorId !== req.user.id) throw new HttpError(403, 'FORBIDDEN', 'You can only delete your own posts.');
   await deletePostContent(post.id);
   return ok(res, { deleted: true });
-}
-
-function setPostDeleteAuthObserverForTests(observer) {
-  if (observer !== null && typeof observer !== 'function') throw new TypeError('Post delete auth observer must be a function or null.');
-  postDeleteAuthObserverForTests = observer;
-}
-
-function resetPostDeleteAuthObserverForTests() {
-  postDeleteAuthObserverForTests = null;
 }
 
 async function archived(req, res) {
@@ -424,4 +411,4 @@ async function toggleCommentPin(req, res) {
   return ok(res, { pinned: Boolean(pinnedAt), pinnedAt });
 }
 
-module.exports = { feed, explore, create, detail, remove, archived, togglePin, toggleArchive, saved, updateCaption, toggleLike, toggleBookmark, listComments, listReplies, createComment, deleteComment, toggleCommentLike, toggleCommentPin, assertPostVisible, shapePost, setPostFeedDependenciesForTests, resetPostFeedDependenciesForTests, setPostDeleteAuthObserverForTests, resetPostDeleteAuthObserverForTests };
+module.exports = { feed, explore, create, detail, remove, archived, togglePin, toggleArchive, saved, updateCaption, toggleLike, toggleBookmark, listComments, listReplies, createComment, deleteComment, toggleCommentLike, toggleCommentPin, assertPostVisible, shapePost, setPostFeedDependenciesForTests, resetPostFeedDependenciesForTests };

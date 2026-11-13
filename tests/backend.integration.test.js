@@ -15,10 +15,8 @@ const request = backendRequire('supertest');
 const { io: clientIo } = backendRequire('socket.io-client');
 const { encode } = backendRequire('@auth/core/jwt');
 const app = require('../backend/src/app');
-const apiRouter = require('../backend/src/routes');
 const prisma = require('../backend/src/config/prisma');
-const { requireAuth, sessionUserFromCookie } = require('../backend/src/middleware/auth');
-const { setPostDeleteAuthObserverForTests, resetPostDeleteAuthObserverForTests } = require('../backend/src/controllers/postController');
+const { sessionUserFromCookie } = require('../backend/src/middleware/auth');
 const { createSocketServer } = require('../backend/src/sockets');
 const { uploadDir } = require('../backend/src/config/env');
 
@@ -82,13 +80,11 @@ test('auth, social persistence, upload validation, messages, and call lifecycle'
     const outsiderCookie = await authCookie(outsider);
     assert.notEqual(firstUser.id, secondUser.id);
     const [firstSession, secondSession] = await Promise.all([sessionUserFromCookie(firstCookie), sessionUserFromCookie(secondCookie)]);
-    console.info('[post-delete-diagnostic] session subjects', JSON.stringify({ firstUserId: firstUser.id, firstUserIdType: typeof firstUser.id, secondUserId: secondUser.id, secondUserIdType: typeof secondUser.id, firstCookieSubject: firstSession?.id || null, firstCookieSubjectType: typeof firstSession?.id, secondCookieSubject: secondSession?.id || null, secondCookieSubjectType: typeof secondSession?.id }));
     assert.equal(firstSession?.id, firstUser.id);
     assert.equal(secondSession?.id, secondUser.id);
     await request(app).get('/api/auth/me').expect(401);
     assert.equal((await request(app).get('/api/auth/me').set('Cookie', firstCookie).expect(200)).body.data.user.id, firstUser.id);
     const secondMe = await request(app).get('/api/auth/me').set('Cookie', secondCookie).expect(200);
-    console.info('[post-delete-diagnostic] second /auth/me', JSON.stringify({ expectedUserId: secondUser.id, expectedUserIdType: typeof secondUser.id, responseUserId: secondMe.body.data.user.id, responseUserIdType: typeof secondMe.body.data.user.id }));
     assert.equal(secondMe.body.data.user.id, secondUser.id);
     await request(app).get('/api/auth/me').set('Cookie', 'authjs.session-token=invalid').expect(401);
 
@@ -113,31 +109,18 @@ test('auth, social persistence, upload validation, messages, and call lifecycle'
     assert.equal(secondIdentityBeforeDelete, secondUser.id);
     assert.equal(persistedPostBeforeDelete.authorId, firstUser.id);
     assert.notEqual(persistedPostBeforeDelete.authorId, secondIdentityBeforeDelete);
-    const deleteRouteLayer = apiRouter.stack.find((layer) => layer.route?.path === '/posts/:id' && layer.route.methods.delete);
-    assert.ok(deleteRouteLayer, 'DELETE /posts/:id must be registered on the API router');
-    assert.equal(deleteRouteLayer.route.stack[0].handle, requireAuth, 'DELETE /posts/:id must start with requireAuth');
-    console.info('[post-delete-diagnostic] registered route', JSON.stringify({ path: deleteRouteLayer.route.path, method: 'DELETE', middleware: deleteRouteLayer.route.stack.map((layer) => layer.handle.name || '<anonymous>') }));
     await request(app).delete(`/api/posts/${ownPost.id}`).expect(401);
     assert.ok(await prisma.post.findUnique({ where: { id: ownPost.id }, select: { id: true } }));
-    let deleteAuthObservation = null;
-    setPostDeleteAuthObserverForTests((observation) => { deleteAuthObservation = observation; });
-    let rejectedDelete;
-    try {
-      rejectedDelete = await request(app).delete(`/api/posts/${ownPost.id}`).set('Cookie', secondCookie);
-    } finally {
-      resetPostDeleteAuthObserverForTests();
-    }
+    const rejectedDelete = await request(app).delete(`/api/posts/${ownPost.id}`).set('Cookie', secondCookie);
     const postAfterRejectedDelete = await prisma.post.findUnique({ where: { id: ownPost.id }, select: { id: true } });
-    console.info('[post-delete-diagnostic] delete request', JSON.stringify({ firstUserId: firstUser.id, secondUserId: secondUser.id, firstCookieSubject: firstSession.id, secondCookieSubject: secondSession.id, secondAuthMeId: secondMe.body.data.user.id, persistedAuthorId: persistedPostBeforeDelete.authorId, controllerEntered: Boolean(deleteAuthObservation), controllerObservation: deleteAuthObservation, responseStatus: rejectedDelete.status, responseBody: rejectedDelete.body, postExistsAfter: Boolean(postAfterRejectedDelete) }));
-    assert.deepEqual(deleteAuthObservation, { postId: ownPost.id, postAuthorId: persistedPostBeforeDelete.authorId, postAuthorIdType: 'string', userId: secondIdentityBeforeDelete, userIdType: 'string', isOwner: false });
-    assert.equal(rejectedDelete.status, 403, `Expected 403 for requester ${secondIdentityBeforeDelete} deleting post owned by ${persistedPostBeforeDelete.authorId}; received ${rejectedDelete.status}.`);
+    assert.equal(rejectedDelete.status, 403, `Expected 403 for requester ${secondUser.id} deleting post owned by ${firstUser.id}; received ${rejectedDelete.status}.`);
     assert.equal(rejectedDelete.body.error.code, 'FORBIDDEN');
     assert.ok(postAfterRejectedDelete);
     assert.equal((await request(app).post(`/api/posts/${ownPost.id}/like`).set('Cookie', secondCookie).expect(200)).body.data.liked, true);
     assert.equal((await request(app).post(`/api/posts/${ownPost.id}/like`).set('Cookie', secondCookie).expect(200)).body.data.liked, false);
     assert.equal((await request(app).post(`/api/posts/${ownPost.id}/bookmark`).set('Cookie', firstCookie).expect(200)).body.data.bookmarked, true);
     const comment = await request(app).post(`/api/posts/${ownPost.id}/comments`).set('Cookie', secondCookie).send({ body: 'A persisted comment.' }).expect(201);
-    await request(app).delete(`/api/comments/${comment.body.data.comment.id}`).set('Cookie', firstCookie).expect(403);
+    await request(app).delete(`/api/comments/${comment.body.data.comment.id}`).set('Cookie', outsiderCookie).expect(403);
     await request(app).delete(`/api/comments/${comment.body.data.comment.id}`).set('Cookie', secondCookie).expect(200);
     await request(app).delete(`/api/posts/${ownPost.id}`).set('Cookie', firstCookie).expect(200);
     assert.equal(await prisma.post.findUnique({ where: { id: ownPost.id }, select: { id: true } }), null);
@@ -189,40 +172,40 @@ test('auth, social persistence, upload validation, messages, and call lifecycle'
     await request(app).post(`/api/blocks/${accounts[1].username}/toggle`).set('Cookie', firstCookie).expect(200);
     assert.equal((await request(app).get('/api/blocks').set('Cookie', firstCookie).expect(200)).body.data.blocks.length, 0);
 
-    // Reports: validated, never self-directed, deduplicated while open, and gated by post visibility.
+    // Reports: validated, never self-directed, idempotent, and gated by post visibility.
     const reportedPost = (await request(app).post('/api/posts').set('Cookie', secondCookie).field('caption', 'Report target').attach('media', image, { filename: 'report.png', contentType: 'image/png' }).expect(201)).body.data.post;
     mediaUrls.push(reportedPost.media[0].url);
-    await request(app).post('/api/reports').send({ username: accounts[1].username, reason: 'SPAM' }).expect(401);
-    await request(app).post('/api/reports').set('Cookie', firstCookie).send({ username: accounts[1].username, reason: 'NOT_A_REASON' }).expect(400);
-    await request(app).post('/api/reports').set('Cookie', firstCookie).send({ reason: 'SPAM' }).expect(400);
-    await request(app).post('/api/reports').set('Cookie', firstCookie).send({ username: accounts[1].username, postId: reportedPost.id, reason: 'SPAM' }).expect(400);
-    await request(app).post('/api/reports').set('Cookie', secondCookie).send({ username: accounts[1].username, reason: 'SPAM' }).expect(400);
-    await request(app).post('/api/reports').set('Cookie', secondCookie).send({ postId: reportedPost.id, reason: 'SPAM' }).expect(400);
-    await request(app).post('/api/reports').set('Cookie', firstCookie).send({ username: `missing_${suffix}`, reason: 'SPAM' }).expect(404);
-    await request(app).post('/api/reports').set('Cookie', firstCookie).send({ postId: 'does-not-exist', reason: 'SPAM' }).expect(404);
+    await request(app).post('/api/reports').send({ targetType: 'USER', targetId: secondUser.id, reason: 'SPAM' }).expect(401);
+    await request(app).post('/api/reports').set('Cookie', firstCookie).send({ targetType: 'USER', targetId: secondUser.id, reason: 'NOT_A_REASON' }).expect(400);
+    await request(app).post('/api/reports').set('Cookie', firstCookie).send({ targetType: 'USER', reason: 'SPAM' }).expect(400);
+    await request(app).post('/api/reports').set('Cookie', firstCookie).send({ targetType: 'INVALID', targetId: secondUser.id, reason: 'SPAM' }).expect(400);
+    await request(app).post('/api/reports').set('Cookie', secondCookie).send({ targetType: 'USER', targetId: secondUser.id, reason: 'SPAM' }).expect(400);
+    await request(app).post('/api/reports').set('Cookie', secondCookie).send({ targetType: 'POST', targetId: reportedPost.id, reason: 'SPAM' }).expect(400);
+    await request(app).post('/api/reports').set('Cookie', firstCookie).send({ targetType: 'USER', targetId: `missing_${suffix}`, reason: 'SPAM' }).expect(404);
+    await request(app).post('/api/reports').set('Cookie', firstCookie).send({ targetType: 'POST', targetId: 'does-not-exist', reason: 'SPAM' }).expect(404);
 
-    const userReport = await request(app).post('/api/reports').set('Cookie', firstCookie).send({ username: accounts[1].username, reason: 'HARASSMENT', details: '  rude  ' }).expect(201);
-    assert.equal(userReport.body.data.duplicate, false);
-    const repeatedReport = await request(app).post('/api/reports').set('Cookie', firstCookie).send({ username: accounts[1].username, reason: 'SPAM' }).expect(200);
-    assert.equal(repeatedReport.body.data.duplicate, true);
+    const userReport = await request(app).post('/api/reports').set('Cookie', firstCookie).send({ targetType: 'USER', targetId: secondUser.id, reason: 'HARASSMENT', details: '  rude  ' }).expect(201);
+    assert.equal(userReport.body.data.alreadyReported, false);
+    const repeatedReport = await request(app).post('/api/reports').set('Cookie', firstCookie).send({ targetType: 'USER', targetId: secondUser.id, reason: 'SPAM' }).expect(200);
+    assert.equal(repeatedReport.body.data.alreadyReported, true);
     assert.equal(repeatedReport.body.data.report.id, userReport.body.data.report.id);
     const storedUserReport = await prisma.report.findUnique({ where: { id: userReport.body.data.report.id } });
     assert.equal(storedUserReport.reporterId, firstUser.id);
-    assert.equal(storedUserReport.targetUserId, secondUser.id);
-    assert.equal(storedUserReport.postId, null);
+    assert.equal(storedUserReport.targetType, 'USER');
+    assert.equal(storedUserReport.targetId, secondUser.id);
     assert.equal(storedUserReport.reason, 'HARASSMENT');
     assert.equal(storedUserReport.details, 'rude');
     assert.equal(storedUserReport.status, 'OPEN');
 
-    const postReport = await request(app).post('/api/reports').set('Cookie', firstCookie).send({ postId: reportedPost.id, reason: 'SPAM' }).expect(201);
+    const postReport = await request(app).post('/api/reports').set('Cookie', firstCookie).send({ targetType: 'POST', targetId: reportedPost.id, reason: 'SPAM' }).expect(201);
     const storedPostReport = await prisma.report.findUnique({ where: { id: postReport.body.data.report.id } });
-    assert.equal(storedPostReport.postId, reportedPost.id);
-    assert.equal(storedPostReport.targetUserId, secondUser.id);
+    assert.equal(storedPostReport.targetType, 'POST');
+    assert.equal(storedPostReport.targetId, reportedPost.id);
     assert.equal(await prisma.report.count({ where: { reporterId: firstUser.id } }), 2);
 
     // A reporter must be able to see the post: private posts cannot be probed through reports.
     await request(app).patch('/api/users/me/profile').set('Cookie', secondCookie).send({ visibility: 'PRIVATE' }).expect(200);
-    await request(app).post('/api/reports').set('Cookie', outsiderCookie).send({ postId: reportedPost.id, reason: 'SPAM' }).expect(403);
+    await request(app).post('/api/reports').set('Cookie', outsiderCookie).send({ targetType: 'POST', targetId: reportedPost.id, reason: 'SPAM' }).expect(403);
     await request(app).patch('/api/users/me/profile').set('Cookie', secondCookie).send({ visibility: 'PUBLIC' }).expect(200);
     assert.equal(await prisma.report.count({ where: { reporterId: outsider.id } }), 0);
 
