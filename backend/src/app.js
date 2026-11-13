@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const path = require('node:path');
-const { frontendUrl, uploadDir, nodeEnv } = require('./config/env');
+const { frontendUrl, uploadDir, nodeEnv, storage } = require('./config/env');
 const api = require('./routes');
 const mediaAccess = require('./middleware/mediaAccess');
 const { HttpError } = require('./utils/http');
@@ -15,10 +15,24 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: false, limit: '1mb' }));
 app.use('/uploads', mediaAccess, express.static(uploadDir, { dotfiles: 'deny', maxAge: nodeEnv === 'production' ? '1h' : 0 }));
 
+app.get('/health/live', (_req, res) => res.status(200).json({ status: 'ok', service: 'backend', timestamp: new Date().toISOString() }));
+
+app.get('/health/ready', async (_req, res) => {
+  let database = 'unavailable';
+  let mediaStorage = storage.enabled ? 'unavailable' : 'disabled';
+  try { await require('./config/prisma').$queryRaw`SELECT 1`; database = 'connected'; } catch { /* status remains unavailable */ }
+  if (storage.enabled) { try { mediaStorage = (await require('./services/minio').check()) ? 'connected' : 'unavailable'; } catch { mediaStorage = 'unavailable'; } }
+  const ready = database === 'connected' && (!storage.enabled || mediaStorage === 'connected');
+  res.status(ready ? 200 : 503).json({ status: ready ? 'ready' : 'not-ready', database, mediaStorage, timestamp: new Date().toISOString() });
+});
+
 app.get('/health', async (_req, res) => {
   let database = 'unavailable';
+  let mediaStorage = storage.enabled ? 'unavailable' : 'disabled';
   try { await require('./config/prisma').$queryRaw`SELECT 1`; database = 'connected'; } catch { /* status remains unavailable */ }
-  res.status(database === 'connected' ? 200 : 503).json({ status: database === 'connected' ? 'ok' : 'degraded', database, timestamp: new Date().toISOString() });
+  if (storage.enabled) { try { mediaStorage = (await require('./services/minio').check()) ? 'connected' : 'unavailable'; } catch { mediaStorage = 'unavailable'; } }
+  const healthy = database === 'connected' && (!storage.enabled || mediaStorage === 'connected');
+  res.status(healthy ? 200 : 503).json({ status: healthy ? 'ok' : 'degraded', database, mediaStorage, timestamp: new Date().toISOString() });
 });
 app.use('/api', api);
 app.use((_req, _res, next) => next(new HttpError(404, 'NOT_FOUND', 'That endpoint does not exist.')));

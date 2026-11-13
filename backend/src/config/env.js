@@ -16,6 +16,29 @@ const mediasoup = {
   reconnectGraceMs: Math.max(3000, Number(process.env.CALL_RECONNECT_GRACE_MS || 15000))
 };
 
+const storage = {
+  enabled: process.env.MINIO_ENABLED !== 'false',
+  endpoint: process.env.MINIO_ENDPOINT || 'http://localhost:9000',
+  publicEndpoint: process.env.MINIO_PUBLIC_ENDPOINT || process.env.MINIO_ENDPOINT || 'http://localhost:9000',
+  accessKey: process.env.MINIO_ACCESS_KEY || 'gatheradmin',
+  secretKey: process.env.MINIO_SECRET_KEY || 'gather_dev_storage_password',
+  bucket: process.env.MINIO_BUCKET || 'gather-media',
+  region: process.env.MINIO_REGION || 'us-east-1',
+  presignExpiresSeconds: Math.min(3600, Math.max(60, Number(process.env.MINIO_PRESIGN_EXPIRES_SECONDS || 300))),
+  startupRetries: Math.min(20, Math.max(1, Number(process.env.MINIO_STARTUP_RETRIES || 15))),
+  startupRetryDelayMs: Math.min(10000, Math.max(250, Number(process.env.MINIO_STARTUP_RETRY_DELAY_MS || 1000)))
+};
+if (!storage.endpoint.startsWith('http://') && !storage.endpoint.startsWith('https://')) throw new Error('MINIO_ENDPOINT must be an http(s) URL.');
+
+if (process.env.NODE_ENV === 'production') {
+  if (!process.env.AUTH_SECRET || process.env.AUTH_SECRET.length < 32) throw new Error('AUTH_SECRET must be explicitly configured with at least 32 characters in production.');
+  if (!process.env.INTERNAL_AUTH_SECRET || process.env.INTERNAL_AUTH_SECRET.length < 32 || process.env.INTERNAL_AUTH_SECRET === process.env.AUTH_SECRET) throw new Error('INTERNAL_AUTH_SECRET must be a separate, explicit secret with at least 32 characters in production.');
+  if (!process.env.FRONTEND_URL || !/^https:\/\//i.test(process.env.FRONTEND_URL)) throw new Error('FRONTEND_URL must be explicitly configured as an HTTPS origin in production.');
+  if (storage.enabled && (!process.env.MINIO_ENDPOINT || !process.env.MINIO_ACCESS_KEY || !process.env.MINIO_SECRET_KEY || !process.env.MINIO_BUCKET)) {
+    throw new Error('MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, and MINIO_BUCKET must be explicitly configured when production storage is enabled.');
+  }
+}
+
 if (!Number.isInteger(mediasoup.rtcMinPort) || !Number.isInteger(mediasoup.rtcMaxPort) || mediasoup.rtcMinPort < 1024 || mediasoup.rtcMaxPort <= mediasoup.rtcMinPort) {
   throw new Error('MEDIASOUP_RTC_MIN_PORT and MEDIASOUP_RTC_MAX_PORT must define a valid inclusive port range.');
 }
@@ -28,5 +51,6 @@ module.exports = {
   internalAuthSecret: process.env.INTERNAL_AUTH_SECRET,
   uploadDir: path.resolve(__dirname, '../../../', process.env.UPLOAD_DIR || 'uploads'),
   nodeEnv: process.env.NODE_ENV || 'development',
-  mediasoup
+  mediasoup,
+  storage
 };

@@ -1,11 +1,13 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { uploadDir } = require('../config/env');
+const { uploadDir, storage } = require('../config/env');
 const { HttpError } = require('../utils/http');
+const { ensureBucket, putFile, deleteObject, parseReference, presignGet } = require('./minio');
 
 const imageTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const videoTypes = new Set(['video/mp4', 'video/webm', 'video/quicktime']);
+const allowedPrefixes = new Set(['avatars', 'posts', 'stories', 'reels', 'misc']);
 
 async function identify(buffer) {
   if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg';
@@ -17,8 +19,33 @@ async function identify(buffer) {
   return null;
 }
 
-async function persistUpload(file) {
-  const actualType = await identify(await fs.readFile(file.path));
+async function readHeader(filePath, length = 64 * 1024) {
+  const handle = await fs.open(filePath, 'r');
+  try {
+    const buffer = Buffer.allocUnsafe(length);
+    const { bytesRead } = await handle.read(buffer, 0, length, 0);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
+}
+
+async function cleanupTempUploads(maxAgeMs = 24 * 60 * 60 * 1000) {
+  await fs.mkdir(path.join(uploadDir, '.tmp'), { recursive: true });
+  const now = Date.now();
+  const entries = await fs.readdir(path.join(uploadDir, '.tmp'), { withFileTypes: true });
+  await Promise.all(entries.filter((entry) => entry.isFile()).map(async (entry) => {
+    const filePath = path.join(uploadDir, '.tmp', entry.name);
+    try {
+      const stat = await fs.stat(filePath);
+      if (now - stat.mtimeMs > maxAgeMs) await fs.rm(filePath, { force: true });
+    } catch { /* A concurrent upload may have already removed the file. */ }
+  }));
+}
+
+async function persistUpload(file, prefix = 'misc') {
+  if (!allowedPrefixes.has(prefix)) prefix = 'misc';
+  const actualType = await identify(await readHeader(file.path));
   if (!actualType || actualType !== file.mimetype || (!imageTypes.has(actualType) && !videoTypes.has(actualType))) {
     await fs.rm(file.path, { force: true });
     throw new HttpError(400, 'INVALID_MEDIA', 'The uploaded file is not a supported image or video.');
@@ -30,18 +57,45 @@ async function persistUpload(file) {
     throw new HttpError(413, 'FILE_TOO_LARGE', `Maximum size is ${isVideo ? 120 : 12} MB.`);
   }
   const extension = actualType === 'image/jpeg' ? '.jpg' : `.${actualType.split('/')[1].replace('quicktime', 'mov')}`;
-  const filename = `${crypto.randomUUID()}${extension}`;
-  const target = path.join(uploadDir, filename);
-  await fs.mkdir(uploadDir, { recursive: true });
-  await fs.rename(file.path, target);
-  return { url: `/uploads/${filename}`, type: isVideo ? 'VIDEO' : 'IMAGE', mimeType: actualType, sizeBytes: file.size };
+  const objectKey = `${prefix}/${crypto.randomUUID()}${extension}`;
+  try {
+    await ensureBucket();
+    await putFile(file.path, objectKey, actualType);
+  } catch (error) {
+    await fs.rm(file.path, { force: true });
+    throw new HttpError(503, 'MEDIA_STORAGE_UNAVAILABLE', `Media storage is unavailable. ${error.message}`);
+  }
+  await fs.rm(file.path, { force: true });
+  return {
+    url: `s3://${storage.bucket}/${objectKey}`,
+    objectKey,
+    type: isVideo ? 'VIDEO' : 'IMAGE',
+    mimeType: actualType,
+    sizeBytes: file.size
+  };
 }
 
-async function removeLocal(url) {
-  if (typeof url !== 'string' || !url.startsWith('/uploads/')) return;
-  const filename = path.basename(url);
+async function removeLocal(reference) {
+  if (typeof reference !== 'string') return;
+  const parsed = parseReference(reference);
+  if (parsed) {
+    await deleteObject(parsed.key);
+    return;
+  }
+  if (!reference.startsWith('/uploads/')) return;
+  const filename = path.basename(reference);
   if (!filename || filename === '.' || filename === '..') return;
   await fs.rm(path.join(uploadDir, filename), { force: true });
 }
 
-module.exports = { persistUpload, removeLocal, identify, imageTypes, videoTypes };
+async function getSignedUrl(reference) {
+  const parsed = parseReference(reference);
+  if (!parsed) throw new HttpError(404, 'MEDIA_NOT_FOUND', 'That media could not be found.');
+  try {
+    return presignGet(reference);
+  } catch (error) {
+    throw new HttpError(503, 'MEDIA_STORAGE_UNAVAILABLE', `Media storage is unavailable. ${error.message}`);
+  }
+}
+
+module.exports = { persistUpload, removeLocal, getSignedUrl, identify, imageTypes, videoTypes, cleanupTempUploads };

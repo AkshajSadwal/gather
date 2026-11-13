@@ -130,6 +130,65 @@ test('auth, social persistence, upload validation, messages, and call lifecycle'
     assert.equal((await prisma.follow.findUnique({ where: { id: pendingRequest.id } })).accepted, true);
     await request(app).patch('/api/users/me/profile').set('Cookie', secondCookie).send({ visibility: 'PUBLIC' }).expect(200);
 
+    const unreadNotifications = await request(app).get('/api/notifications/unread').set('Cookie', secondCookie).expect(200);
+    assert.equal(typeof unreadNotifications.body.data.total, 'number');
+
+    // Block is reciprocal for interactions: it removes existing follow links and blocks
+    // future follow/message/call operations without deleting the target account.
+    const blockResponse = await request(app).post(`/api/blocks/${accounts[1].username}/toggle`).set('Cookie', firstCookie).expect(200);
+    assert.equal(blockResponse.body.data.blocked, true);
+    await request(app).post(`/api/follows/${accounts[1].username}/toggle`).set('Cookie', firstCookie).expect(403);
+    await request(app).post(`/api/messages/conversations/${accounts[1].username}`).set('Cookie', firstCookie).expect(403);
+
+    // Blocked-accounts list is private to the blocker and reflects unblocking.
+    await request(app).get('/api/blocks').expect(401);
+    const blockList = await request(app).get('/api/blocks').set('Cookie', firstCookie).expect(200);
+    assert.equal(blockList.body.data.blocks.length, 1);
+    assert.equal(blockList.body.data.blocks[0].user.username, accounts[1].username);
+    assert.equal(blockList.body.data.blocks[0].user.id, secondUser.id);
+    assert.equal('email' in blockList.body.data.blocks[0].user, false);
+    assert.equal((await request(app).get('/api/blocks').set('Cookie', secondCookie).expect(200)).body.data.blocks.length, 0);
+
+    await request(app).post(`/api/blocks/${accounts[1].username}/toggle`).set('Cookie', firstCookie).expect(200);
+    assert.equal((await request(app).get('/api/blocks').set('Cookie', firstCookie).expect(200)).body.data.blocks.length, 0);
+
+    // Reports: validated, never self-directed, deduplicated while open, and gated by post visibility.
+    const reportedPost = (await request(app).post('/api/posts').set('Cookie', secondCookie).field('caption', 'Report target').attach('media', image, { filename: 'report.png', contentType: 'image/png' }).expect(201)).body.data.post;
+    mediaUrls.push(reportedPost.media[0].url);
+    await request(app).post('/api/reports').send({ username: accounts[1].username, reason: 'SPAM' }).expect(401);
+    await request(app).post('/api/reports').set('Cookie', firstCookie).send({ username: accounts[1].username, reason: 'NOT_A_REASON' }).expect(400);
+    await request(app).post('/api/reports').set('Cookie', firstCookie).send({ reason: 'SPAM' }).expect(400);
+    await request(app).post('/api/reports').set('Cookie', firstCookie).send({ username: accounts[1].username, postId: reportedPost.id, reason: 'SPAM' }).expect(400);
+    await request(app).post('/api/reports').set('Cookie', secondCookie).send({ username: accounts[1].username, reason: 'SPAM' }).expect(400);
+    await request(app).post('/api/reports').set('Cookie', secondCookie).send({ postId: reportedPost.id, reason: 'SPAM' }).expect(400);
+    await request(app).post('/api/reports').set('Cookie', firstCookie).send({ username: `missing_${suffix}`, reason: 'SPAM' }).expect(404);
+    await request(app).post('/api/reports').set('Cookie', firstCookie).send({ postId: 'does-not-exist', reason: 'SPAM' }).expect(404);
+
+    const userReport = await request(app).post('/api/reports').set('Cookie', firstCookie).send({ username: accounts[1].username, reason: 'HARASSMENT', details: '  rude  ' }).expect(201);
+    assert.equal(userReport.body.data.duplicate, false);
+    const repeatedReport = await request(app).post('/api/reports').set('Cookie', firstCookie).send({ username: accounts[1].username, reason: 'SPAM' }).expect(200);
+    assert.equal(repeatedReport.body.data.duplicate, true);
+    assert.equal(repeatedReport.body.data.report.id, userReport.body.data.report.id);
+    const storedUserReport = await prisma.report.findUnique({ where: { id: userReport.body.data.report.id } });
+    assert.equal(storedUserReport.reporterId, firstUser.id);
+    assert.equal(storedUserReport.targetUserId, secondUser.id);
+    assert.equal(storedUserReport.postId, null);
+    assert.equal(storedUserReport.reason, 'HARASSMENT');
+    assert.equal(storedUserReport.details, 'rude');
+    assert.equal(storedUserReport.status, 'OPEN');
+
+    const postReport = await request(app).post('/api/reports').set('Cookie', firstCookie).send({ postId: reportedPost.id, reason: 'SPAM' }).expect(201);
+    const storedPostReport = await prisma.report.findUnique({ where: { id: postReport.body.data.report.id } });
+    assert.equal(storedPostReport.postId, reportedPost.id);
+    assert.equal(storedPostReport.targetUserId, secondUser.id);
+    assert.equal(await prisma.report.count({ where: { reporterId: firstUser.id } }), 2);
+
+    // A reporter must be able to see the post: private posts cannot be probed through reports.
+    await request(app).patch('/api/users/me/profile').set('Cookie', secondCookie).send({ visibility: 'PRIVATE' }).expect(200);
+    await request(app).post('/api/reports').set('Cookie', outsiderCookie).send({ postId: reportedPost.id, reason: 'SPAM' }).expect(403);
+    await request(app).patch('/api/users/me/profile').set('Cookie', secondCookie).send({ visibility: 'PUBLIC' }).expect(200);
+    assert.equal(await prisma.report.count({ where: { reporterId: outsider.id } }), 0);
+
     const story = await request(app).post('/api/stories').set('Cookie', firstCookie).attach('media', image, { filename: 'story.png', contentType: 'image/png' }).expect(201);
     mediaUrls.push(story.body.data.story.media[0].url);
     await request(app).post(`/api/stories/${story.body.data.story.id}/view`).set('Cookie', secondCookie).expect(200);

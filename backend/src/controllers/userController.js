@@ -3,7 +3,9 @@ const prisma = require('../config/prisma');
 const { normalizeUsername } = require('../utils/normalize');
 const { HttpError, ok } = require('../utils/http');
 const { createNotification } = require('../services/notifications');
+const { logReelEvent } = require('../services/recoEvents');
 const { persistUpload, removeLocal } = require('../services/storage');
+const { getBlockState, isBlockedBetween, getBlockedUserIds } = require('../services/blocks');
 
 async function profile(req, res) {
   const username = normalizeUsername(req.params.username);
@@ -17,19 +19,25 @@ async function profile(req, res) {
   });
   if (!user) throw new HttpError(404, 'USER_NOT_FOUND', 'That profile could not be found.');
   const isSelf = req.user?.id === user.id;
-  const isFollowing = user.followers.length > 0;
+  const blockState = isSelf ? { blocked: false, blockedBy: false } : await getBlockState(req.user?.id, user.id);
+  const mute = req.user?.id && !isSelf ? await prisma.mute.findUnique({ where: { muterId_mutedId: { muterId: req.user.id, mutedId: user.id } }, select: { id: true } }) : null;
+  if (blockState.blockedBy) throw new HttpError(404, 'USER_NOT_FOUND', 'That profile could not be found.');
+  if (blockState.blocked) {
+    return ok(res, { user: { id: user.id, username: user.username, image: user.image, profile: null, _count: { followers: 0, following: 0, posts: 0 }, isSelf: false, isFollowing: false, isFollowPending: false, canView: false, isBlocked: true, isBlockedBy: false, isMuted: Boolean(mute) }, posts: [] });
+  }
+  const isFollowing = user.followers.length > 0 && !blockState.blocked && !blockState.blockedBy;
   const pendingRelation = req.user?.id ? await prisma.follow.findUnique({ where: { followerId_followedId: { followerId: req.user.id, followedId: user.id } }, select: { accepted: true } }) : null;
   const isFollowPending = Boolean(pendingRelation && !pendingRelation.accepted);
   const visibility = user.profile?.visibility || 'PUBLIC';
-  const canView = isSelf || visibility === 'PUBLIC' || isFollowing;
+  const canView = !blockState.blocked && !blockState.blockedBy && (isSelf || visibility === 'PUBLIC' || isFollowing);
   const [followersCount, followingCount, postsCount, posts] = await Promise.all([
     prisma.follow.count({ where: { followedId: user.id, accepted: true } }),
     prisma.follow.count({ where: { followerId: user.id, accepted: true } }),
-    prisma.post.count({ where: { authorId: user.id } }),
-    canView ? prisma.post.findMany({ where: { authorId: user.id }, orderBy: { createdAt: 'desc' }, take: 24, include: { author: { select: { id: true, username: true, image: true, profile: true } }, media: { orderBy: { position: 'asc' } }, likes: { where: { userId: req.user?.id || '__visitor__' }, select: { id: true }, take: 1 }, bookmarks: { where: { userId: req.user?.id || '__visitor__' }, select: { id: true }, take: 1 }, _count: { select: { likes: true, comments: true } } } }) : Promise.resolve([])
+    prisma.post.count({ where: { authorId: user.id, archivedAt: null } }),
+    canView ? prisma.post.findMany({ where: { authorId: user.id, archivedAt: null }, orderBy: [{ pinnedAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }], take: 24, include: { author: { select: { id: true, username: true, image: true, profile: true } }, media: { orderBy: { position: 'asc' } }, likes: { where: { userId: req.user?.id || '__visitor__' }, select: { id: true }, take: 1 }, bookmarks: { where: { userId: req.user?.id || '__visitor__' }, select: { id: true }, take: 1 }, _count: { select: { likes: true, comments: true } } } }) : Promise.resolve([])
   ]);
   const shapedPosts = posts.map((post) => ({ ...post, isLiked: post.likes.length > 0, isBookmarked: post.bookmarks.length > 0, likes: undefined, bookmarks: undefined }));
-  return ok(res, { user: { ...user, followers: undefined, _count: { followers: followersCount, following: followingCount, posts: postsCount }, isSelf, isFollowing, isFollowPending, canView }, posts: shapedPosts });
+  return ok(res, { user: { ...user, followers: undefined, _count: { followers: followersCount, following: followingCount, posts: postsCount }, isSelf, isFollowing, isFollowPending, canView, isBlocked: blockState.blocked, isBlockedBy: blockState.blockedBy, isMuted: Boolean(mute) }, posts: shapedPosts });
 }
 
 async function updateProfile(req, res) {
@@ -38,7 +46,6 @@ async function updateProfile(req, res) {
     bio: z.string().trim().max(500).optional(),
     website: z.union([z.string().url().max(2048), z.literal('')]).optional(),
     visibility: z.enum(['PUBLIC', 'PRIVATE']).optional(),
-    avatarUrl: z.string().refine((value) => value.startsWith('/uploads/') || value.startsWith('https://')).max(2048).nullable().optional()
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) throw new HttpError(400, 'VALIDATION_ERROR', 'Profile details are invalid.', parsed.error.flatten().fieldErrors);
@@ -53,9 +60,9 @@ async function updateAvatar(req, res) {
     await require('node:fs/promises').rm(req.file.path, { force: true });
     throw new HttpError(400, 'IMAGE_REQUIRED', 'Profile photos must be images.');
   }
-  const media = await persistUpload(req.file);
+  const media = await persistUpload(req.file, 'avatars');
   if (media.type !== 'IMAGE') throw new HttpError(400, 'IMAGE_REQUIRED', 'Profile photos must be images.');
-  const current = await prisma.user.findUnique({ where: { id: req.user.id }, select: { image: true } });
+  const current = await prisma.user.findUnique({ where: { id: req.user.id }, select: { image: true, profile: { select: { avatarUrl: true } } } });
   let profile;
   try {
     profile = await prisma.$transaction(async (tx) => {
@@ -64,7 +71,8 @@ async function updateAvatar(req, res) {
       return updated;
     });
   } catch (error) { await removeLocal(media.url).catch(() => {}); throw error; }
-  if (current?.image?.startsWith('/uploads/')) await removeLocal(current.image).catch(() => {});
+  const previousAvatars = new Set([current?.image, current?.profile?.avatarUrl].filter((url) => typeof url === 'string' && (url.startsWith('/uploads/') || url.startsWith('s3://'))));
+  await Promise.all([...previousAvatars].filter((url) => url !== media.url).map((url) => removeLocal(url).catch(() => {})));
   return ok(res, { profile, image: media.url });
 }
 
@@ -86,21 +94,40 @@ async function follow(req, res) {
   const target = await prisma.user.findUnique({ where: { username: normalizeUsername(req.params.username) }, select: { id: true, profile: { select: { visibility: true } } } });
   if (!target) throw new HttpError(404, 'USER_NOT_FOUND', 'That account could not be found.');
   if (target.id === req.user.id) throw new HttpError(400, 'CANNOT_FOLLOW_SELF', 'You cannot follow your own account.');
+  if (await isBlockedBetween(req.user.id, target.id)) throw new HttpError(403, 'BLOCKED', 'You cannot follow this account.');
   const existing = await prisma.follow.findUnique({ where: { followerId_followedId: { followerId: req.user.id, followedId: target.id } } });
   if (existing) {
     await prisma.follow.delete({ where: { id: existing.id } });
+    if (existing.accepted) logReelEvent({ userId: req.user.id, creatorId: target.id, type: 'CREATOR_UNFOLLOW', impressionId: req.get('x-reco-impression-id') || undefined });
+    await prisma.notification.deleteMany({
+      where: {
+        recipientId: target.id,
+        actorId: req.user.id,
+        type: existing.accepted ? 'FOLLOW' : 'FOLLOW_REQUEST',
+        entityId: existing.id
+      }
+    });
     return ok(res, { following: false, cancelledRequest: !existing.accepted });
   }
   const pending = target.profile?.visibility === 'PRIVATE';
-  await prisma.follow.create({ data: { followerId: req.user.id, followedId: target.id, accepted: !pending } });
-  await createNotification({ recipientId: target.id, actorId: req.user.id, type: pending ? 'FOLLOW_REQUEST' : 'FOLLOW' });
-  return ok(res, { following: !pending, pending });
+  const relation = await prisma.follow.create({
+    data: { followerId: req.user.id, followedId: target.id, accepted: !pending }
+  });
+  if (!pending) logReelEvent({ userId: req.user.id, creatorId: target.id, type: 'CREATOR_FOLLOW', impressionId: req.get('x-reco-impression-id') || undefined });
+  await createNotification({
+    recipientId: target.id,
+    actorId: req.user.id,
+    type: pending ? 'FOLLOW_REQUEST' : 'FOLLOW',
+    entityId: relation.id
+  });
+  return ok(res, { following: !pending, pending, requestId: pending ? relation.id : null });
 }
 
 async function listRelation(req, res) {
   const username = normalizeUsername(req.params.username);
   const target = await prisma.user.findUnique({ where: { username }, select: { id: true, profile: { select: { visibility: true } } } });
   if (!target) throw new HttpError(404, 'USER_NOT_FOUND', 'That profile could not be found.');
+  if (await isBlockedBetween(req.user?.id, target.id)) throw new HttpError(403, 'BLOCKED', 'You cannot view this account.');
   if (target.profile?.visibility === 'PRIVATE' && req.user?.id !== target.id) {
     const follow = req.user?.id ? await prisma.follow.findUnique({ where: { followerId_followedId: { followerId: req.user.id, followedId: target.id } }, select: { accepted: true } }) : null;
     if (!follow?.accepted) throw new HttpError(403, 'PRIVATE_ACCOUNT', 'Follow this account to view its connections.');
@@ -126,22 +153,68 @@ async function updateFollowRequest(req, res) {
   if (!relation || relation.followedId !== req.user.id || relation.accepted) throw new HttpError(404, 'REQUEST_NOT_FOUND', 'That follow request could not be found.');
   if (parsed.data.accepted) {
     await prisma.follow.update({ where: { id: relation.id }, data: { accepted: true } });
-    await createNotification({ recipientId: relation.followerId, actorId: req.user.id, type: 'FOLLOW' });
-    return ok(res, { accepted: true });
+    await createNotification({ recipientId: relation.followerId, actorId: req.user.id, type: 'FOLLOW', entityId: relation.id });
+    const reverse = await prisma.follow.findUnique({
+      where: { followerId_followedId: { followerId: relation.followedId, followedId: relation.followerId } },
+      select: { accepted: true }
+    });
+    return ok(res, {
+      accepted: true,
+      followingBack: reverse?.accepted === true,
+      followBackPending: Boolean(reverse && !reverse.accepted)
+    });
   }
   await prisma.follow.delete({ where: { id: relation.id } });
+  await prisma.notification.deleteMany({
+    where: { recipientId: req.user.id, actorId: relation.followerId, type: 'FOLLOW_REQUEST', entityId: relation.id }
+  });
   return ok(res, { accepted: false });
+}
+
+async function toggleBlock(req, res) {
+  const username = normalizeUsername(req.params.username);
+  const target = await prisma.user.findUnique({ where: { username }, select: { id: true, username: true } });
+  if (!target) throw new HttpError(404, 'USER_NOT_FOUND', 'That account could not be found.');
+  if (target.id === req.user.id) throw new HttpError(400, 'CANNOT_BLOCK_SELF', 'You cannot block your own account.');
+  const existing = await prisma.block.findUnique({ where: { blockerId_blockedId: { blockerId: req.user.id, blockedId: target.id } } });
+  if (existing) {
+    await prisma.block.delete({ where: { id: existing.id } });
+    return ok(res, { blocked: false, username: target.username });
+  }
+  await prisma.$transaction(async (tx) => {
+    await tx.block.create({ data: { blockerId: req.user.id, blockedId: target.id } });
+    await tx.follow.deleteMany({
+      where: { OR: [
+        { followerId: req.user.id, followedId: target.id },
+        { followerId: target.id, followedId: req.user.id }
+      ] }
+    });
+    await tx.closeFriend.deleteMany({ where: { OR: [{ ownerId: req.user.id, friendId: target.id }, { ownerId: target.id, friendId: req.user.id }] } });
+  });
+  logReelEvent({ userId: req.user.id, creatorId: target.id, type: 'CREATOR_BLOCK' });
+  return ok(res, { blocked: true, username: target.username });
+}
+
+async function listBlocks(req, res) {
+  const rows = await prisma.block.findMany({
+    where: { blockerId: req.user.id },
+    orderBy: { createdAt: 'desc' },
+    take: 200,
+    select: { id: true, createdAt: true, blocked: { select: { id: true, username: true, image: true, profile: { select: { displayName: true, avatarUrl: true } } } } }
+  });
+  return ok(res, { blocks: rows.map((row) => ({ id: row.id, createdAt: row.createdAt, user: row.blocked })) });
 }
 
 async function search(req, res) {
   const query = String(req.query.q || '').trim().replace(/^[@#]/, '').slice(0, 100);
   if (query.length < 1) return ok(res, { users: [], hashtags: [], posts: [] });
+  const blockedIds = await getBlockedUserIds(req.user?.id);
   const [users, hashtags, posts] = await Promise.all([
-    prisma.user.findMany({ where: { OR: [{ username: { contains: query.toLowerCase() } }, { profile: { displayName: { contains: query, mode: 'insensitive' } } }] }, take: 12, select: { id: true, username: true, image: true, profile: true } }),
-    prisma.hashtag.findMany({ where: { tag: { contains: query.toLowerCase() } }, take: 8, include: { _count: { select: { posts: true } } } }),
-    prisma.post.findMany({ where: { caption: { contains: query, mode: 'insensitive' }, author: { is: { profile: { is: { visibility: 'PUBLIC' } } } } }, take: 12, orderBy: { createdAt: 'desc' }, include: { media: { take: 1, orderBy: { position: 'asc' } }, author: { select: { username: true, image: true } }, _count: { select: { likes: true, comments: true } } } })
+    prisma.user.findMany({ where: { id: { notIn: blockedIds }, OR: [{ username: { contains: query.toLowerCase() } }, { profile: { displayName: { contains: query, mode: 'insensitive' } } }] }, take: 12, select: { id: true, username: true, image: true, profile: true } }),
+    prisma.hashtag.findMany({ where: { tag: { contains: query.toLowerCase() }, posts: { some: { post: { is: { archivedAt: null } } } } }, take: 8, include: { _count: { select: { posts: { where: { post: { is: { archivedAt: null } } } } } } } }),
+    prisma.post.findMany({ where: { authorId: { notIn: blockedIds }, archivedAt: null, caption: { contains: query, mode: 'insensitive' }, author: { is: { profile: { is: { visibility: 'PUBLIC' } } } } }, take: 12, orderBy: { createdAt: 'desc' }, include: { media: { take: 1, orderBy: { position: 'asc' } }, author: { select: { username: true, image: true } }, _count: { select: { likes: true, comments: true } } } })
   ]);
   return ok(res, { users, hashtags, posts });
 }
 
-module.exports = { profile, updateProfile, updateAvatar, follow, removeFollower, listRelation, followRequests, updateFollowRequest, search };
+module.exports = { profile, updateProfile, updateAvatar, follow, removeFollower, listRelation, followRequests, updateFollowRequest, toggleBlock, listBlocks, search };

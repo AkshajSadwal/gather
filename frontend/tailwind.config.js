@@ -4,15 +4,23 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        ink: '#15251f',
-        moss: '#315d4f',
-        mint: '#cce7d8',
-        paper: '#f7f8f4',
-        coral: '#ec785d',
-        line: '#e9ece7'
+        ink: 'var(--ink)',
+        moss: 'var(--moss)',
+        mint: 'var(--mint)',
+        paper: 'var(--paper)',
+        surface: 'var(--surface)',
+        'surface-raised': 'var(--surface-raised)',
+        glass: 'var(--glass)',
+        'glass-strong': 'var(--glass-strong)',
+        'glass-floating': 'var(--glass-strong)',
+        'glass-border': 'var(--glass-border)',
+        coral: 'var(--coral)',
+        line: 'var(--line)'
       },
-      boxShadow: { soft: '0 8px 30px rgba(23,47,37,.07)' },
-      fontFamily: { sans: ['var(--font-inter)', 'Arial', 'sans-serif'] }
+      boxShadow: { soft: 'var(--shadow-soft)', float: 'var(--shadow-float)' },
+      fontFamily: { sans: ['Inter', 'Avenir Next', 'ui-sans-serif', 'system-ui', 'sans-serif'] },
+      borderRadius: { card: '1.25rem', panel: '1.75rem' },
+      transitionTimingFunction: { ui: 'cubic-bezier(.2, .75, .25, 1)' }
     }
   },
   plugins: []

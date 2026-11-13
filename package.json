@@ -20,7 +20,8 @@
     "test": "npm run test --workspace=@instagram-clone/backend",
     "test:e2e": "playwright test",
     "build": "npm run build --workspace=@instagram-clone/frontend",
-    "lint": "npm run lint --workspaces --if-present"
+    "lint": "npm run lint --workspaces --if-present",
+    "storage:check": "node -e \"require('./backend/src/services/minio').check().then(ok=>{console.log(ok?'MinIO storage: connected':'MinIO storage: unavailable');process.exit(ok?0:1)})\""
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",

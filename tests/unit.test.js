@@ -8,8 +8,11 @@ const backendRequire = createRequire(path.resolve(__dirname, '../backend/package
 const { encode } = backendRequire('@auth/core/jwt');
 const { normalizeEmail, normalizeUsername, validUsername } = require('../backend/src/utils/normalize');
 const { identify } = require('../backend/src/services/storage');
-const { sessionUserFromCookie, SESSION_COOKIE_NAME } = require('../backend/src/middleware/auth');
+const { sessionUserFromCookie, SESSION_COOKIE_NAME, setSessionUserLookup, resetSessionUserLookup } = require('../backend/src/middleware/auth');
 const { MediasoupService } = require('../backend/src/services/mediasoupService');
+const { reportSchema, REPORT_REASONS } = require('../backend/src/utils/reportSchema');
+const { isSupportedReaction } = require('../backend/src/utils/messageRules');
+const { clientEventSchema, deriveCompleted, affinityDecay, clampOccurredAt, deriveTrainingLabels, eventWeight } = require('../backend/src/services/recoEvents');
 
 test('account identifiers normalize consistently and usernames are validated', () => {
   assert.equal(normalizeUsername('  Ｍaya.Name  '), 'maya.name');
@@ -20,6 +23,14 @@ test('account identifiers normalize consistently and usernames are validated', (
   assert.equal(validUsername('double..dot'), false);
 });
 
+test('message reaction emoji validation accepts only the supported set', () => {
+  assert.equal(isSupportedReaction('❤️'), true);
+  assert.equal(isSupportedReaction('👍'), true);
+  assert.equal(isSupportedReaction('🧨'), false);
+  assert.equal(isSupportedReaction(''), false);
+  assert.equal(isSupportedReaction(null), false);
+});
+
 test('media signature checks recognize supported formats and reject fake image bytes', async () => {
   assert.equal(await identify(Buffer.from([0xff, 0xd8, 0xff, 0x00])), 'image/jpeg');
   assert.equal(await identify(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])), 'image/png');
@@ -28,7 +39,9 @@ test('media signature checks recognize supported formats and reject fake image b
   assert.equal(await identify(Buffer.from('plain text is not media')), null);
 });
 
-test('backend accepts only the active Auth.js session cookie and its subject', async () => {
+test('backend accepts only the active Auth.js session cookie and its subject', async (t) => {
+  setSessionUserLookup(async (id) => ({ id, passwordChangedAt: null }));
+  t.after(resetSessionUserLookup);
   const name = SESSION_COOKIE_NAME;
   const token = await encode({ token: { sub: 'user-unit-1', email: 'unit@example.test' }, secret: process.env.AUTH_SECRET, salt: name, maxAge: 3600 });
   const valid = await sessionUserFromCookie(`${name}=${encodeURIComponent(token)}`);
@@ -51,6 +64,35 @@ test('backend accepts only the active Auth.js session cookie and its subject', a
   const mixedCookies = `${legacyName}=${encodeURIComponent(legacyToken)}; ${name}=${encodeURIComponent(activeToken)}`;
   const mixed = await sessionUserFromCookie(mixedCookies);
   assert.equal(mixed.id, 'right-user');
+});
+
+test('session lookup rejects an unknown user without connecting to the database', async (t) => {
+  setSessionUserLookup(async () => null);
+  t.after(resetSessionUserLookup);
+  const name = SESSION_COOKIE_NAME;
+  const token = await encode({ token: { sub: 'unknown-unit-user' }, secret: process.env.AUTH_SECRET, salt: name, maxAge: 3600 });
+  assert.equal(await sessionUserFromCookie(`${name}=${encodeURIComponent(token)}`), null);
+});
+
+test('session lookup rejects missing or stale authAt after a password change', async (t) => {
+  const authAt = Math.floor(Date.now() / 1000) - 60;
+  setSessionUserLookup(async (id) => ({ id, passwordChangedAt: new Date((authAt + 10) * 1000) }));
+  t.after(resetSessionUserLookup);
+  const name = SESSION_COOKIE_NAME;
+  const stale = await encode({ token: { sub: 'stale-unit-user', authAt }, secret: process.env.AUTH_SECRET, salt: name, maxAge: 3600 });
+  const missing = await encode({ token: { sub: 'missing-auth-at-user' }, secret: process.env.AUTH_SECRET, salt: name, maxAge: 3600 });
+  assert.equal(await sessionUserFromCookie(`${name}=${encodeURIComponent(stale)}`), null);
+  assert.equal(await sessionUserFromCookie(`${name}=${encodeURIComponent(missing)}`), null);
+});
+
+test('session lookup accepts authAt later than passwordChangedAt', async (t) => {
+  const authAt = Math.floor(Date.now() / 1000);
+  setSessionUserLookup(async (id) => ({ id, passwordChangedAt: new Date((authAt - 10) * 1000) }));
+  t.after(resetSessionUserLookup);
+  const name = SESSION_COOKIE_NAME;
+  const token = await encode({ token: { sub: 'fresh-unit-user', authAt }, secret: process.env.AUTH_SECRET, salt: name, maxAge: 3600 });
+  const user = await sessionUserFromCookie(`${name}=${encodeURIComponent(token)}`);
+  assert.equal(user.id, 'fresh-unit-user');
 });
 
 test('mediasoup worker creates one room with deduplicated send and receive transports and closes cleanly', async () => {
@@ -79,4 +121,32 @@ test('mediasoup worker creates one room with deduplicated send and receive trans
   } finally {
     await service.close();
   }
+});
+
+test('report payloads require exactly one target, a known reason, and bounded details', () => {
+  assert.equal(reportSchema.safeParse({ targetType: 'USER', targetId: 'abc123', reason: 'SPAM' }).success, true);
+  assert.equal(reportSchema.safeParse({ targetType: 'COMMENT', targetId: 'comment1', reason: 'INAPPROPRIATE', details: 'why' }).success, true);
+  assert.equal(reportSchema.safeParse({ targetId: 'abc123', reason: 'SPAM' }).success, false);
+  assert.equal(reportSchema.safeParse({ targetType: 'STORY', targetId: 'abc123', reason: 'SPAM' }).success, false);
+  assert.equal(reportSchema.safeParse({ targetType: 'POST', targetId: 'abc123', reason: 'BOGUS' }).success, false);
+  assert.equal(reportSchema.safeParse({ targetType: 'POST', targetId: 'abc123', reason: 'SPAM', details: 'x'.repeat(501) }).success, false);
+  assert.equal(reportSchema.parse({ targetType: 'USER', targetId: 'abc123', reason: 'SPAM', details: '  padded  ' }).details, 'padded');
+  assert.equal(reportSchema.parse({ targetType: 'POST', targetId: 'abc123', reason: 'SPAM' }).details, '');
+  assert.equal(REPORT_REASONS.length, 5);
+});
+
+test('reel recommendation event validation and labels are bounded and deterministic', () => {
+  const valid = { eventId: 'evt-1', type: 'WATCH_END', reelId: 'reel-1', payload: { watchMs: 9000, videoDurationMs: 10000, visibleMs: 4000 } };
+  assert.equal(clientEventSchema.safeParse(valid).success, true);
+  assert.equal(clientEventSchema.safeParse({ ...valid, type: 'IMPRESSION_VIEWABLE', requestId: 'req-1', payload: { visibleMs: 1000 } }).success, true);
+  assert.equal(clientEventSchema.safeParse({ ...valid, type: 'WATCH_PROGRESS', payload: { watchMs: 5000, videoDurationMs: 10000 } }).success, true);
+  assert.equal(clientEventSchema.safeParse({ ...valid, type: 'REPORT' }).success, false);
+  assert.equal(clientEventSchema.safeParse({ ...valid, payload: { watchMs: -1 } }).success, false);
+  assert.equal(deriveCompleted(8999, 10000), false);
+  assert.equal(deriveCompleted(9000, 10000), true);
+  assert.equal(eventWeight('WATCH_END', valid.payload), 0.5);
+  assert.equal(affinityDecay(8, new Date('2026-01-01T00:00:00Z'), new Date('2026-01-15T00:00:00Z')), 4);
+  assert.equal(deriveTrainingLabels({ watchMs: 1000, visibleMs: 1000, videoDurationMs: 10000 }).skip, true);
+  const receivedAt = new Date('2026-11-12T12:00:00Z');
+  assert.deepEqual(clampOccurredAt(new Date('2026-11-10T12:00:00Z'), receivedAt), { occurredAt: receivedAt, clamped: true });
 });

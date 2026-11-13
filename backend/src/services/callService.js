@@ -1,4 +1,5 @@
 const { MediasoupService } = require('./mediasoupService');
+const { isBlockedBetween } = require('./blocks');
 
 const activeStates = new Set(['RINGING', 'ACCEPTED', 'CONNECTING', 'CONNECTED']);
 const allowedTransitions = {
@@ -90,6 +91,7 @@ class CallService {
       if (this.closed) throw new Error('CALL_SERVICE_CLOSED');
       if (!conversationId || !toUserId || userId === toUserId || !['VOICE', 'VIDEO'].includes(type)) throw new Error('INVALID_CALL');
       if (this.busyUsers.has(userId) || this.busyUsers.has(toUserId)) throw new Error('USER_BUSY');
+      if (await isBlockedBetween(userId, toUserId)) throw new Error('FORBIDDEN');
 
       const participants = await this.prisma.conversationParticipant.findMany({
         where: { conversationId },

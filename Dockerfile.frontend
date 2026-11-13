@@ -1,0 +1,29 @@
+FROM node:24-bookworm-slim AS build
+WORKDIR /app
+ARG NEXT_PUBLIC_API_URL=http://localhost:30400
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_TELEMETRY_DISABLED=1
+
+COPY package.json package-lock.json ./
+COPY frontend/package.json ./frontend/package.json
+COPY backend/package.json ./backend/package.json
+RUN npm ci
+COPY frontend ./frontend
+RUN npm run build --workspace=@instagram-clone/frontend
+
+FROM node:24-bookworm-slim AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+COPY --from=build /app/package.json ./package.json
+COPY --from=build /app/package-lock.json ./package-lock.json
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/frontend/package.json ./frontend/package.json
+COPY --from=build /app/frontend/.next/standalone ./
+COPY --from=build /app/frontend/.next/static ./frontend/.next/static
+RUN chown -R node:node /app
+USER node
+
+EXPOSE 3000
+CMD ["node", "frontend/server.js"]

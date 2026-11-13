@@ -16,9 +16,49 @@ enum NotificationType {
   FOLLOW_REQUEST
   LIKE
   COMMENT
+  REPLY
   MENTION
   MESSAGE
   STORY_VIEW
+  COMMENT_LIKE
+  STORY_REPLY
+}
+enum StoryAudience {
+  EVERYONE
+  CLOSE_FRIENDS
+}
+
+enum ReelCandidateSource {
+  FOLLOWING
+  POPULAR
+  FRESH
+  EXPLORE
+  AFFINITY
+  MODEL1
+}
+
+enum ReelEventType {
+  IMPRESSION_VISIBLE
+  IMPRESSION_VIEWABLE
+  WATCH_START
+  WATCH_PROGRESS
+  WATCH_END
+  WATCH_COMPLETE
+  REPLAY
+  LIKE
+  UNLIKE
+  SAVE
+  UNSAVE
+  SHARE
+  COMMENT
+  CREATOR_FOLLOW
+  CREATOR_UNFOLLOW
+  PROFILE_OPEN
+  NOT_INTERESTED
+  REPORT
+  REPORT_REEL
+  CREATOR_BLOCK
+  CREATOR_MUTE
 }
 enum MediaType {
   IMAGE
@@ -39,11 +79,35 @@ enum CallStatus {
   FAILED
 }
 
+enum ReportTargetType {
+  POST
+  COMMENT
+  USER
+}
+enum ReportReason {
+  SPAM
+  HARASSMENT
+  INAPPROPRIATE
+  IMPERSONATION
+  OTHER
+}
+enum ReportStatus {
+  OPEN
+  REVIEWED
+  DISMISSED
+}
+
+enum ModerationActionType {
+  REPORT_REVIEWED
+  CONTENT_REMOVED
+}
+
 model User {
   id                  String   @id @default(cuid())
   username            String   @unique @db.VarChar(30)
   email               String   @unique @db.VarChar(254)
   passwordHash        String?
+  passwordChangedAt   DateTime?
   emailVerified       DateTime?
   image               String?
   createdAt           DateTime @default(now())
@@ -54,19 +118,102 @@ model User {
   posts               Post[]
   likes               Like[]
   comments            Comment[]
+  commentLikes CommentLike[]
   bookmarks           Bookmark[]
   notifications       Notification[] @relation("notificationRecipient")
   actorNotifications  Notification[] @relation("notificationActor")
   messages            Message[]
+  messageReactions MessageReaction[]
   conversationLinks   ConversationParticipant[]
   stories             Story[]
+  closeFriendsOwned CloseFriend[] @relation("closeFriendOwner")
+  closeFriendsReceived CloseFriend[] @relation("closeFriendFriend")
   storyViews          StoryView[]
   reels               Reel[]
   callsInitiated      CallSession[] @relation("callInitiator")
   callsReceived       CallSession[] @relation("callRecipient")
-
+  blocksCreated      Block[] @relation("blocker")
+  blocksReceived     Block[] @relation("blocked")
+  mutesCreated       Mute[] @relation("muter")
+  mutesReceived      Mute[] @relation("muted")
+  reportsFiled       Report[] @relation("reportFiled")
+  reportsReviewed    Report[] @relation("reportReviewed")
+  moderationActions ModerationAction[] @relation("moderationModerator")
+  personalizedRecs Boolean @default(true)
+  recsResetAt DateTime?
+  reelImpressions ReelImpression[] @relation("reelImpressionViewer")
+  creatorReelImpressions ReelImpression[] @relation("reelImpressionCreator")
+  reelEvents ReelEvent[] @relation("reelEventUser")
+  creatorReelEvents ReelEvent[] @relation("reelEventCreator")
+  recoAffinities UserCreatorAffinity[] @relation("affinityUser")
+  creatorAffinities UserCreatorAffinity[] @relation("affinityCreator")
+  recoFeatures UserRecoFeatures?
+  recommendationRequests RecommendationRequest[]
 }
 
+
+model Block {
+  id        String   @id @default(cuid())
+  blockerId String
+  blockedId String
+  blocker   User     @relation("blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked   User     @relation("blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  @@unique([blockerId, blockedId])
+  @@index([blockerId, createdAt])
+  @@index([blockedId, createdAt])
+}
+
+model Mute {
+  id        String   @id @default(cuid())
+  muterId   String
+  mutedId   String
+  muter     User     @relation("muter", fields: [muterId], references: [id], onDelete: Cascade)
+  muted     User     @relation("muted", fields: [mutedId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  @@unique([muterId, mutedId])
+  @@index([muterId, createdAt])
+  @@index([mutedId, createdAt])
+}
+
+model Report {
+  id         String           @id @default(cuid())
+  reporterId String
+  targetType ReportTargetType
+  targetId   String
+  reason     ReportReason
+  details    String?          @db.VarChar(500)
+  status     ReportStatus     @default(OPEN)
+  createdAt  DateTime         @default(now())
+  reviewedById String?
+  reviewedAt DateTime?
+  reporter   User             @relation("reportFiled", fields: [reporterId], references: [id], onDelete: Cascade)
+  reviewedBy User?            @relation("reportReviewed", fields: [reviewedById], references: [id], onDelete: SetNull)
+  moderationActions ModerationAction[] @relation("moderationReport")
+  @@unique([reporterId, targetType, targetId])
+  @@index([status, createdAt])
+  @@index([reviewedById])
+}
+
+model ModerationAction {
+  id               String                @id @default(cuid())
+  reportId         String?
+  reportRef        String
+  targetType       ReportTargetType
+  targetId         String
+  reason           ReportReason
+  moderatorId      String?
+  moderatorUsername String               @db.VarChar(30)
+  action           ModerationActionType
+  previousStatus   ReportStatus?
+  newStatus        ReportStatus?
+  createdAt        DateTime              @default(now())
+  report           Report?               @relation("moderationReport", fields: [reportId], references: [id], onDelete: SetNull)
+  moderator        User?                 @relation("moderationModerator", fields: [moderatorId], references: [id], onDelete: SetNull)
+  @@index([reportRef, createdAt])
+  @@index([moderatorId, createdAt])
+  @@index([createdAt, id])
+}
 model Profile {
   id          String @id @default(cuid())
   userId      String @unique
@@ -81,6 +228,17 @@ model Profile {
   @@index([avatarUrl])
 }
 
+model CloseFriend {
+  id        String   @id @default(cuid())
+  ownerId   String
+  friendId  String
+  createdAt DateTime @default(now())
+  owner     User     @relation("closeFriendOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  friend    User     @relation("closeFriendFriend", fields: [friendId], references: [id], onDelete: Cascade)
+  @@unique([ownerId, friendId])
+  @@index([ownerId, createdAt])
+  @@index([friendId, createdAt])
+}
 model Follow {
   id          String @id @default(cuid())
   followerId  String
@@ -99,6 +257,8 @@ model Post {
   authorId  String
   author    User @relation(fields: [authorId], references: [id], onDelete: Cascade)
   caption   String @default("") @db.VarChar(2200)
+  pinnedAt  DateTime?
+  archivedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   media     PostMedia[]
@@ -107,7 +267,9 @@ model Post {
   bookmarks Bookmark[]
   hashtags  PostHashtag[]
   reel      Reel?
+  sharedMessages Message[] @relation("sharedPost")
   @@index([authorId, createdAt])
+  @@index([authorId, archivedAt, pinnedAt])
   @@index([createdAt])
 }
 
@@ -116,6 +278,7 @@ model PostMedia {
   postId    String
   post      Post @relation(fields: [postId], references: [id], onDelete: Cascade)
   url       String
+  objectKey String?
   type      MediaType
   mimeType  String
   sizeBytes Int
@@ -145,11 +308,28 @@ model Comment {
   user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
   post      Post @relation(fields: [postId], references: [id], onDelete: Cascade)
   body      String @db.VarChar(1000)
+  pinnedAt DateTime?
+  parentId  String?
+  parent    Comment? @relation("commentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   Comment[] @relation("commentReplies")
+  likes CommentLike[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   @@index([postId, createdAt])
+  @@index([postId, parentId, createdAt])
 }
 
+model CommentLike {
+  id        String   @id @default(cuid())
+  commentId String
+  userId    String
+  createdAt DateTime @default(now())
+  comment   Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([commentId, userId])
+  @@index([commentId, createdAt])
+  @@index([userId, createdAt])
+}
 model Bookmark {
   id        String @id @default(cuid())
   userId    String
@@ -220,12 +400,31 @@ model Message {
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender         User @relation(fields: [senderId], references: [id], onDelete: Cascade)
   body           String @db.VarChar(4000)
+  sharedPostId   String?
+  storyId        String?
+  storyReplyPreview String? @db.VarChar(500)
+  sharedPost     Post? @relation("sharedPost", fields: [sharedPostId], references: [id], onDelete: SetNull)
+  story          Story? @relation("storyMessageReplies", fields: [storyId], references: [id], onDelete: SetNull)
   createdAt      DateTime @default(now())
   deliveredAt    DateTime?
+  deletedAt      DateTime?
   reads          MessageRead[]
+  reactions MessageReaction[]
   @@index([conversationId, createdAt])
 }
 
+model MessageReaction {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  emoji     String   @db.VarChar(8)
+  createdAt DateTime @default(now())
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([messageId, userId])
+  @@index([messageId, createdAt])
+  @@index([userId, createdAt])
+}
 model MessageRead {
   id        String @id @default(cuid())
   messageId String
@@ -241,10 +440,12 @@ model Story {
   authorId  String
   author    User @relation(fields: [authorId], references: [id], onDelete: Cascade)
   caption   String @default("") @db.VarChar(500)
+  audience StoryAudience @default(EVERYONE)
   createdAt DateTime @default(now())
   expiresAt DateTime
   media     StoryMedia[]
   views     StoryView[]
+  replyMessages Message[] @relation("storyMessageReplies")
   @@index([authorId, expiresAt])
   @@index([expiresAt])
 }
@@ -254,6 +455,7 @@ model StoryMedia {
   storyId   String
   story     Story @relation(fields: [storyId], references: [id], onDelete: Cascade)
   url       String
+  objectKey String?
   type      MediaType
   mimeType  String
   sizeBytes Int
@@ -278,10 +480,16 @@ model Reel {
   authorId  String
   postId    String? @unique
   caption   String @default("") @db.VarChar(2200)
+  durationMs Int?
+  language String? @db.VarChar(8)
   createdAt DateTime @default(now())
   author    User @relation(fields: [authorId], references: [id], onDelete: Cascade)
   post      Post? @relation(fields: [postId], references: [id], onDelete: Cascade)
   media     ReelMedia[]
+  impressions ReelImpression[]
+  events ReelEvent[]
+  dailyStats ReelStatsDaily[]
+  recoFeatures ReelRecoFeatures?
   @@index([createdAt])
   @@index([authorId, createdAt])
 }
@@ -291,11 +499,167 @@ model ReelMedia {
   reelId    String
   reel      Reel @relation(fields: [reelId], references: [id], onDelete: Cascade)
   url       String
+  objectKey String?
   mimeType  String
   sizeBytes Int
   createdAt DateTime @default(now())
   @@index([reelId])
   @@index([url])
+}
+
+model ReelImpression {
+  id                   String                @id @default(cuid())
+  requestId            String
+  userId               String
+  reelId               String
+  creatorId            String?
+  sessionId            String
+  position             Int
+  servedAt             DateTime
+  seenAt               DateTime?
+  visibleMs            Int                   @default(0)
+  watchMs              Int                   @default(0)
+  maxProgressMs        Int                   @default(0)
+  replayCount          Int                   @default(0)
+  videoDurationMs      Int?
+  completed            Boolean               @default(false)
+  candidateSource      ReelCandidateSource
+  retrievalScore       Float?
+  rankingScore         Float?
+  modelVersion         String?               @db.VarChar(64)
+  retrievalModelVersion String?              @db.VarChar(64)
+  rankingModelVersion  String?               @db.VarChar(64)
+  featureSchemaVersion String?               @db.VarChar(64)
+  reelFeaturesSnapshot Json?
+  experimentId         String?               @db.VarChar(64)
+  appVersion           String?               @db.VarChar(32)
+  userFeaturesSnapshot Json?
+  liked                Boolean               @default(false)
+  saved                Boolean               @default(false)
+  shared               Boolean               @default(false)
+  commented            Boolean               @default(false)
+  followed             Boolean               @default(false)
+  profileOpened        Boolean               @default(false)
+  notInterested        Boolean               @default(false)
+  user                 User                  @relation("reelImpressionViewer", fields: [userId], references: [id], onDelete: Cascade)
+  reel                 Reel                  @relation(fields: [reelId], references: [id], onDelete: Cascade)
+  request              RecommendationRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  creator              User?                 @relation("reelImpressionCreator", fields: [creatorId], references: [id], onDelete: SetNull)
+  events               ReelEvent[]
+  @@unique([requestId, position])
+  @@index([userId, servedAt])
+  @@index([reelId, servedAt])
+  @@index([requestId])
+  @@index([userId, reelId])
+  @@index([creatorId, servedAt])
+}
+
+model ReelEvent {
+  id          String         @id @default(cuid())
+  eventId     String         @unique
+  type        ReelEventType
+  userId      String
+  reelId      String?
+  creatorId   String?
+  impressionId String?
+  requestId    String?
+  sessionId   String?
+  occurredAt  DateTime
+  receivedAt  DateTime       @default(now())
+  payload     Json?
+  schemaVersion String       @default("gather-events-v1") @db.VarChar(32)
+  appVersion  String?        @db.VarChar(32)
+  user        User           @relation("reelEventUser", fields: [userId], references: [id], onDelete: Cascade)
+  reel        Reel?          @relation(fields: [reelId], references: [id], onDelete: SetNull)
+  creator     User?          @relation("reelEventCreator", fields: [creatorId], references: [id], onDelete: SetNull)
+  impression  ReelImpression? @relation(fields: [impressionId], references: [id], onDelete: SetNull)
+  @@index([userId, occurredAt])
+  @@index([reelId, occurredAt])
+  @@index([impressionId])
+  @@index([type, occurredAt])
+  @@index([requestId, occurredAt])
+}
+
+model RecommendationRequest {
+  id                    String   @id
+  userId                String
+  sessionId             String?  @db.VarChar(128)
+  requestedAt           DateTime @default(now())
+  feedSize              Int
+  cursor                String?  @db.VarChar(256)
+  retrievalModelVersion String?  @db.VarChar(64)
+  rankingModelVersion   String?  @db.VarChar(64)
+  featureSchemaVersion  String   @db.VarChar(64)
+  provider              String   @db.VarChar(32)
+  latencyMs             Int?
+  status                String   @default("OK") @db.VarChar(24)
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  impressions           ReelImpression[]
+  @@index([userId, requestedAt])
+  @@index([provider, requestedAt])
+  @@index([status, requestedAt])
+}
+
+model UserCreatorAffinity {
+  userId            String
+  creatorId         String
+  score             Float
+  positiveCount     Int      @default(0)
+  negativeCount     Int      @default(0)
+  lastInteractionAt DateTime
+  updatedAt         DateTime @updatedAt
+  user              User     @relation("affinityUser", fields: [userId], references: [id], onDelete: Cascade)
+  creator           User     @relation("affinityCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  @@id([userId, creatorId])
+  @@index([userId, score])
+  @@index([creatorId])
+}
+
+model UserRecoFeatures {
+  userId     String   @id
+  features   Json
+  featureVersion String @default("gather-user-v1") @db.VarChar(64)
+  computedAt DateTime
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ReelRecoFeatures {
+  reelId        String   @id
+  features      Json
+  featureVersion String  @default("gather-reel-v1") @db.VarChar(64)
+  updatedAt     DateTime @updatedAt
+  reel          Reel     @relation(fields: [reelId], references: [id], onDelete: Cascade)
+}
+
+model RecommendationModelVersion {
+  id                     String   @id @default(cuid())
+  provider               String   @db.VarChar(32)
+  retrievalModelVersion  String?  @db.VarChar(64)
+  rankingModelVersion    String?  @db.VarChar(64)
+  retrievalIndexVersion  String?  @db.VarChar(64)
+  featureSchemaVersion   String   @db.VarChar(64)
+  rankingFormulaVersion  String   @db.VarChar(64)
+  manifestReference      String?  @db.VarChar(512)
+  activatedAt            DateTime @default(now())
+  @@index([activatedAt])
+}
+
+model ReelStatsDaily {
+  reelId         String
+  day            DateTime @db.Date
+  impressions    Int      @default(0)
+  views          Int      @default(0)
+  watchMsSum     BigInt   @default(0)
+  completes      Int      @default(0)
+  likes          Int      @default(0)
+  saves          Int      @default(0)
+  shares         Int      @default(0)
+  comments       Int      @default(0)
+  follows        Int      @default(0)
+  notInterested  Int      @default(0)
+  reel           Reel     @relation(fields: [reelId], references: [id], onDelete: Cascade)
+  @@id([reelId, day])
+  @@index([day])
 }
 
 model CallSession {

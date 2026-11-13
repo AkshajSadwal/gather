@@ -1,0 +1,24 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gather-db-migrate
+spec:
+  backoffLimit: 4
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: gather-db-migrate
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: gather-backend:local
+          imagePullPolicy: IfNotPresent
+          command: ["npx", "prisma", "migrate", "deploy"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: gather-app-secrets
+                  key: DATABASE_URL
