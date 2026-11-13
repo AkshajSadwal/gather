@@ -13,6 +13,7 @@ const { MediasoupService } = require('../backend/src/services/mediasoupService')
 const { reportSchema, REPORT_REASONS } = require('../backend/src/utils/reportSchema');
 const { isSupportedReaction } = require('../backend/src/utils/messageRules');
 const { clientEventSchema, deriveCompleted, affinityDecay, clampOccurredAt, deriveTrainingLabels, eventWeight } = require('../backend/src/services/recoEvents');
+const { shapePost } = require('../backend/src/controllers/postController');
 
 test('account identifiers normalize consistently and usernames are validated', () => {
   assert.equal(normalizeUsername('  Ｍaya.Name  '), 'maya.name');
@@ -21,6 +22,13 @@ test('account identifiers normalize consistently and usernames are validated', (
   assert.equal(validUsername('ab'), false);
   assert.equal(validUsername('.starting'), false);
   assert.equal(validUsername('double..dot'), false);
+});
+
+test('post shaping is available as a safe callback for hashtag listings', () => {
+  const post = shapePost({ id: 'post-1', likes: [{ id: 'like-1' }], bookmarks: [] });
+  assert.equal(post.isLiked, true);
+  assert.equal(post.isBookmarked, false);
+  assert.equal(post.likes, undefined);
 });
 
 test('message reaction emoji validation accepts only the supported set', () => {

@@ -85,8 +85,8 @@ async function feed(req, res) {
     await prisma.recommendationRequest.create({ data: {
       id: requestId, userId: req.user.id, sessionId, requestedAt: servedAt, feedSize: safeCandidates.length,
       cursor: typeof req.query.cursor === 'string' ? req.query.cursor.slice(0, 256) : null,
-      retrievalModelVersion: provider === 'two_stage_v1' ? modelVersion : null,
-      rankingModelVersion: provider === 'two_stage_v1' ? modelVersion : null,
+      retrievalModelVersion: provider === 'kuairand_zero_shot_v1' ? modelVersion : null,
+      rankingModelVersion: provider === 'kuairand_zero_shot_v1' ? modelVersion : null,
       featureSchemaVersion: 'gather-reco-v1', provider,
       status: safeCandidates.length ? 'OK' : 'EMPTY'
     } });
@@ -94,8 +94,8 @@ async function feed(req, res) {
       requestId, userId: req.user.id, reelId: candidate.reelId, creatorId: candidate.creatorId,
       sessionId, position, servedAt, candidateSource: candidate.candidateSource,
       retrievalScore: candidate.retrievalScore, rankingScore: candidate.rankingScore, modelVersion,
-      retrievalModelVersion: provider === 'two_stage_v1' ? modelVersion : null,
-      rankingModelVersion: provider === 'two_stage_v1' ? modelVersion : null,
+      retrievalModelVersion: provider === 'kuairand_zero_shot_v1' ? modelVersion : null,
+      rankingModelVersion: provider === 'kuairand_zero_shot_v1' ? modelVersion : null,
       featureSchemaVersion: 'gather-reco-v1',
       userFeaturesSnapshot: snapshotsByReel.get(candidate.reelId).user,
       reelFeaturesSnapshot: snapshotsByReel.get(candidate.reelId).reel

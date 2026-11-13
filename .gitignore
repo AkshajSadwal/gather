@@ -27,3 +27,5 @@ minio.license
 !README.md
 !**/README.md
 node_modules/
+
+frontend.zip

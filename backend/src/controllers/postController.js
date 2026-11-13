@@ -411,4 +411,4 @@ async function toggleCommentPin(req, res) {
   return ok(res, { pinned: Boolean(pinnedAt), pinnedAt });
 }
 
-module.exports = { feed, explore, create, detail, remove, archived, togglePin, toggleArchive, saved, updateCaption, toggleLike, toggleBookmark, listComments, listReplies, createComment, deleteComment, toggleCommentLike, toggleCommentPin, assertPostVisible, setPostFeedDependenciesForTests, resetPostFeedDependenciesForTests };
+module.exports = { feed, explore, create, detail, remove, archived, togglePin, toggleArchive, saved, updateCaption, toggleLike, toggleBookmark, listComments, listReplies, createComment, deleteComment, toggleCommentLike, toggleCommentPin, assertPostVisible, shapePost, setPostFeedDependenciesForTests, resetPostFeedDependenciesForTests };

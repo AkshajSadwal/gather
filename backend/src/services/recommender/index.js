@@ -2,9 +2,10 @@ const prisma = require('../../config/prisma');
 const { getBlockedUserIds } = require('../blocks');
 const { mutedIdsFor } = require('../relations');
 const modelService = require('./modelService');
+const { isReelEligible, applyModelRanking } = require('./rankingPolicy');
 const { opaqueId, buildUserFeatureSnapshot, buildReelFeatureSnapshot, mergeForModel } = require('../recoFeatureSchema');
 
-const MODEL_VERSION = 'two_stage_v1';
+const MODEL_VERSION = 'kuairand_zero_shot_v1';
 
 async function getCandidates({ userId, sessionId, requestId, limit = 10, excludeReelIds = [] }) {
   const now = new Date();
@@ -35,11 +36,10 @@ async function getCandidates({ userId, sessionId, requestId, limit = 10, exclude
     orderBy: { createdAt: 'desc' }, take: 250,
     select: { id: true, authorId: true, createdAt: true, durationMs: true, language: true, author: { select: { createdAt: true, profile: { select: { visibility: true } }, _count: { select: { followers: { where: { accepted: true } } } } } }, media: { select: { sizeBytes: true } }, post: { select: { id: true, archivedAt: true, hashtags: { include: { hashtag: { select: { tag: true } } } } } } }
   });
-  const privateFollowed = followed;
-  const eligible = reels.filter((reel) => {
-    if (reel.author.profile?.visibility === 'PRIVATE' && reel.authorId !== userId && !privateFollowed.has(reel.authorId)) return false;
-    return !personalizationEnabled || (affinity.get(reel.authorId) ?? 0) > -3;
-  });
+  const hiddenIds = new Set(hidden);
+  const eligible = reels.filter((reel) => isReelEligible(reel, {
+    userId, hiddenIds, followedIds: followed, personalizationEnabled, affinity
+  }));
   const freshCutoff = new Date(now.getTime() - 7 * 86400000);
   let usedModel = false;
   const stats = await prisma.reelStatsDaily.groupBy({ by: ['reelId'], where: { reelId: { in: eligible.map((row) => row.id) }, day: { gte: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 6)) } }, _sum: { views: true, likes: true, watchMsSum: true } });
@@ -69,18 +69,12 @@ async function getCandidates({ userId, sessionId, requestId, limit = 10, exclude
       candidates: candidates.map((candidate) => {
         const reelKey = opaqueId('reel', candidate.reelId);
         const creatorKey = opaqueId('creator', candidate.creatorId);
-        return { reelId: candidate.reelId, reelKey, creatorId: creatorKey, features: mergeForModel(userSnapshot, featureById.get(candidate.reelId) || {}) };
+        return { reelId: candidate.reelId, reelKey, creatorId: creatorKey, candidateSource: candidate.candidateSource, features: mergeForModel(userSnapshot, featureById.get(candidate.reelId) || {}) };
       })
     });
     if (ranked?.status === 'READY' && Array.isArray(ranked.items)) {
-      const unique = new Set();
-      const trusted = ranked.items.flatMap((item) => {
-        const original = poolById.get(item?.reelId);
-        if (!original || unique.has(item.reelId) || !Number.isFinite(item.rankingScore)) return [];
-        unique.add(item.reelId);
-        return [{ ...original, candidateSource: 'EXPLORE', retrievalScore: Number.isFinite(item.retrievalScore) ? item.retrievalScore : null, rankingScore: item.rankingScore }];
-      });
-      if (trusted.length) { candidates = trusted; usedModel = true; }
+      const trusted = applyModelRanking([...poolById.values()], ranked);
+      if (trusted) { candidates = trusted; usedModel = true; }
     }
   }
   const result = [];
