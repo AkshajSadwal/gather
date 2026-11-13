@@ -15,7 +15,10 @@ const request = backendRequire('supertest');
 const { io: clientIo } = backendRequire('socket.io-client');
 const { encode } = backendRequire('@auth/core/jwt');
 const app = require('../backend/src/app');
+const apiRouter = require('../backend/src/routes');
 const prisma = require('../backend/src/config/prisma');
+const { requireAuth, sessionUserFromCookie } = require('../backend/src/middleware/auth');
+const { setPostDeleteAuthObserverForTests, resetPostDeleteAuthObserverForTests } = require('../backend/src/controllers/postController');
 const { createSocketServer } = require('../backend/src/sockets');
 const { uploadDir } = require('../backend/src/config/env');
 
@@ -77,8 +80,16 @@ test('auth, social persistence, upload validation, messages, and call lifecycle'
     const firstCookie = await authCookie(firstUser);
     const secondCookie = await authCookie(secondUser);
     const outsiderCookie = await authCookie(outsider);
+    assert.notEqual(firstUser.id, secondUser.id);
+    const [firstSession, secondSession] = await Promise.all([sessionUserFromCookie(firstCookie), sessionUserFromCookie(secondCookie)]);
+    console.info('[post-delete-diagnostic] session subjects', JSON.stringify({ firstUserId: firstUser.id, firstUserIdType: typeof firstUser.id, secondUserId: secondUser.id, secondUserIdType: typeof secondUser.id, firstCookieSubject: firstSession?.id || null, firstCookieSubjectType: typeof firstSession?.id, secondCookieSubject: secondSession?.id || null, secondCookieSubjectType: typeof secondSession?.id }));
+    assert.equal(firstSession?.id, firstUser.id);
+    assert.equal(secondSession?.id, secondUser.id);
     await request(app).get('/api/auth/me').expect(401);
-    await request(app).get('/api/auth/me').set('Cookie', firstCookie).expect(200);
+    assert.equal((await request(app).get('/api/auth/me').set('Cookie', firstCookie).expect(200)).body.data.user.id, firstUser.id);
+    const secondMe = await request(app).get('/api/auth/me').set('Cookie', secondCookie).expect(200);
+    console.info('[post-delete-diagnostic] second /auth/me', JSON.stringify({ expectedUserId: secondUser.id, expectedUserIdType: typeof secondUser.id, responseUserId: secondMe.body.data.user.id, responseUserIdType: typeof secondMe.body.data.user.id }));
+    assert.equal(secondMe.body.data.user.id, secondUser.id);
     await request(app).get('/api/auth/me').set('Cookie', 'authjs.session-token=invalid').expect(401);
 
     assert.equal((await request(app).get(`/api/users/check-username?username=${accounts[0].username.toUpperCase()}`).expect(200)).body.data.available, false);
@@ -94,9 +105,34 @@ test('auth, social persistence, upload validation, messages, and call lifecycle'
 
     const ownPostResponse = await request(app).post('/api/posts').set('Cookie', firstCookie).field('caption', 'A test moment #integration').attach('media', image, { filename: 'tiny.png', contentType: 'image/png' }).expect(201);
     const ownPost = ownPostResponse.body.data.post;
+    assert.equal(ownPost.authorId, firstUser.id);
     mediaUrls.push(ownPost.media[0].url);
     assert.equal(ownPost.hashtags[0].hashtag.tag, 'integration');
-    await request(app).delete(`/api/posts/${ownPost.id}`).set('Cookie', secondCookie).expect(403);
+    const secondIdentityBeforeDelete = (await request(app).get('/api/auth/me').set('Cookie', secondCookie).expect(200)).body.data.user.id;
+    const persistedPostBeforeDelete = await prisma.post.findUnique({ where: { id: ownPost.id }, select: { id: true, authorId: true } });
+    assert.equal(secondIdentityBeforeDelete, secondUser.id);
+    assert.equal(persistedPostBeforeDelete.authorId, firstUser.id);
+    assert.notEqual(persistedPostBeforeDelete.authorId, secondIdentityBeforeDelete);
+    const deleteRouteLayer = apiRouter.stack.find((layer) => layer.route?.path === '/posts/:id' && layer.route.methods.delete);
+    assert.ok(deleteRouteLayer, 'DELETE /posts/:id must be registered on the API router');
+    assert.equal(deleteRouteLayer.route.stack[0].handle, requireAuth, 'DELETE /posts/:id must start with requireAuth');
+    console.info('[post-delete-diagnostic] registered route', JSON.stringify({ path: deleteRouteLayer.route.path, method: 'DELETE', middleware: deleteRouteLayer.route.stack.map((layer) => layer.handle.name || '<anonymous>') }));
+    await request(app).delete(`/api/posts/${ownPost.id}`).expect(401);
+    assert.ok(await prisma.post.findUnique({ where: { id: ownPost.id }, select: { id: true } }));
+    let deleteAuthObservation = null;
+    setPostDeleteAuthObserverForTests((observation) => { deleteAuthObservation = observation; });
+    let rejectedDelete;
+    try {
+      rejectedDelete = await request(app).delete(`/api/posts/${ownPost.id}`).set('Cookie', secondCookie);
+    } finally {
+      resetPostDeleteAuthObserverForTests();
+    }
+    const postAfterRejectedDelete = await prisma.post.findUnique({ where: { id: ownPost.id }, select: { id: true } });
+    console.info('[post-delete-diagnostic] delete request', JSON.stringify({ firstUserId: firstUser.id, secondUserId: secondUser.id, firstCookieSubject: firstSession.id, secondCookieSubject: secondSession.id, secondAuthMeId: secondMe.body.data.user.id, persistedAuthorId: persistedPostBeforeDelete.authorId, controllerEntered: Boolean(deleteAuthObservation), controllerObservation: deleteAuthObservation, responseStatus: rejectedDelete.status, responseBody: rejectedDelete.body, postExistsAfter: Boolean(postAfterRejectedDelete) }));
+    assert.deepEqual(deleteAuthObservation, { postId: ownPost.id, postAuthorId: persistedPostBeforeDelete.authorId, postAuthorIdType: 'string', userId: secondIdentityBeforeDelete, userIdType: 'string', isOwner: false });
+    assert.equal(rejectedDelete.status, 403, `Expected 403 for requester ${secondIdentityBeforeDelete} deleting post owned by ${persistedPostBeforeDelete.authorId}; received ${rejectedDelete.status}.`);
+    assert.equal(rejectedDelete.body.error.code, 'FORBIDDEN');
+    assert.ok(postAfterRejectedDelete);
     assert.equal((await request(app).post(`/api/posts/${ownPost.id}/like`).set('Cookie', secondCookie).expect(200)).body.data.liked, true);
     assert.equal((await request(app).post(`/api/posts/${ownPost.id}/like`).set('Cookie', secondCookie).expect(200)).body.data.liked, false);
     assert.equal((await request(app).post(`/api/posts/${ownPost.id}/bookmark`).set('Cookie', firstCookie).expect(200)).body.data.bookmarked, true);
@@ -104,6 +140,7 @@ test('auth, social persistence, upload validation, messages, and call lifecycle'
     await request(app).delete(`/api/comments/${comment.body.data.comment.id}`).set('Cookie', firstCookie).expect(403);
     await request(app).delete(`/api/comments/${comment.body.data.comment.id}`).set('Cookie', secondCookie).expect(200);
     await request(app).delete(`/api/posts/${ownPost.id}`).set('Cookie', firstCookie).expect(200);
+    assert.equal(await prisma.post.findUnique({ where: { id: ownPost.id }, select: { id: true } }), null);
     mediaUrls.pop();
 
     await request(app).post('/api/posts').set('Cookie', firstCookie).field('caption', 'bad').attach('media', Buffer.from('not an image'), { filename: 'bad.jpg', contentType: 'image/jpeg' }).expect(400);

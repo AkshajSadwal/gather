@@ -3,6 +3,7 @@ process.env.FRONTEND_URL ||= 'http://localhost:3000';
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const path = require('node:path');
 const { createRequire } = require('node:module');
 const backendRequire = createRequire(path.resolve(__dirname, '../backend/package.json'));
@@ -21,7 +22,7 @@ async function authCookie(user) {
 test('blocks, comment ownership, caption permissions, password checks, and account cascade', async (t) => {
   if (!process.env.DATABASE_URL) { t.skip('DATABASE_URL is not set; this integration test needs a disposable local database.'); return; }
   await prisma.$connect();
-  const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const suffix = crypto.randomBytes(8).toString('hex');
   const users = [];
   const makeUser = async (name, passwordHash = null) => {
     const username = `${name}_${suffix}`.slice(0, 30);
@@ -73,7 +74,7 @@ test('blocks, comment ownership, caption permissions, password checks, and accou
 test('Round 2 privacy, session revocation, moderation, and hashtag visibility', async (t) => {
   if (!process.env.DATABASE_URL) { t.skip('DATABASE_URL is not set; use a disposable local PostgreSQL database.'); return; }
   await prisma.$connect();
-  const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const suffix = crypto.randomBytes(8).toString('hex');
   const users = [];
   const originalAdmins = process.env.ADMIN_USERNAMES;
   const makeUser = async (name, visibility = 'PUBLIC', passwordHash = null) => {
@@ -139,7 +140,7 @@ test('Round 2 privacy, session revocation, moderation, and hashtag visibility', 
 test('admin report review is recorded in moderation history', async (t) => {
   if (!process.env.DATABASE_URL) { t.skip('DATABASE_URL is not set; this integration test needs a disposable local database.'); return; }
   await prisma.$connect();
-  const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+  const suffix = crypto.randomBytes(8).toString('hex');
   const userIds = [];
   const reportIds = [];
   const previousAdmins = process.env.ADMIN_USERNAMES;
@@ -181,7 +182,7 @@ test('admin report review is recorded in moderation history', async (t) => {
 test('Round four archives, pins, Close Friends, comment likes, reactions, and sharing', async (t) => {
   if (!process.env.DATABASE_URL) { t.skip('DATABASE_URL is not set; PostgreSQL integration tests need a disposable local database.'); return; }
   try { await prisma.$connect(); } catch (error) { await prisma.$disconnect(); t.skip(`PostgreSQL is unavailable: ${error.message.split('\n')[0]}`); return; }
-  const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
+  const suffix = crypto.randomBytes(8).toString('hex');
   const userIds = [];
   const createUser = async (prefix) => {
     const username = `${prefix}_${suffix}`.slice(0, 30);
@@ -199,12 +200,14 @@ test('Round four archives, pins, Close Friends, comment likes, reactions, and sh
     const viewer = await createUser('r4_viewer');
     const friend = await createUser('r4_friend');
     const outsider = await createUser('r4_outsider');
-    const posts = await Promise.all(Array.from({ length: 4 }, (_, index) => prisma.post.create({ data: { authorId: owner.id, caption: `post ${index}` } })));
+    const posts = await Promise.all(Array.from({ length: 5 }, (_, index) => prisma.post.create({ data: { authorId: owner.id, caption: `post ${index}` } })));
     await request(app).post(`/api/posts/${posts[0].id}/archive`).set('Cookie', await cookieFor(owner)).expect(200);
     await request(app).get(`/api/posts/${posts[0].id}`).set('Cookie', await cookieFor(viewer)).expect(404);
     await request(app).get(`/api/posts/${posts[0].id}`).set('Cookie', await cookieFor(owner)).expect(200);
     for (const post of posts.slice(1, 4)) await request(app).post(`/api/posts/${post.id}/pin`).set('Cookie', await cookieFor(owner)).expect(200);
-    const pinLimit = await request(app).post(`/api/posts/${posts[0].id}/pin`).set('Cookie', await cookieFor(owner)).expect(409);
+    const archivedPin = await request(app).post(`/api/posts/${posts[0].id}/pin`).set('Cookie', await cookieFor(owner)).expect(409);
+    assert.equal(archivedPin.body.error.code, 'POST_ARCHIVED');
+    const pinLimit = await request(app).post(`/api/posts/${posts[4].id}/pin`).set('Cookie', await cookieFor(owner)).expect(409);
     assert.equal(pinLimit.body.error.code, 'PIN_LIMIT');
 
     const comment = await prisma.comment.create({ data: { postId: posts[1].id, userId: owner.id, body: 'like this' } });
@@ -238,7 +241,7 @@ test('Round four archives, pins, Close Friends, comment likes, reactions, and sh
 test('Round five recommendation feed, event privacy, reset, and cascade', async (t) => {
   if (!process.env.DATABASE_URL) { t.skip('DATABASE_URL is not set; PostgreSQL integration tests need a disposable local database.'); return; }
   try { await prisma.$connect(); } catch (error) { await prisma.$disconnect(); t.skip(`PostgreSQL is unavailable: ${error.message.split('\n')[0]}`); return; }
-  const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const suffix = crypto.randomBytes(8).toString('hex');
   const userIds = [];
   const createUser = async (prefix) => {
     const username = `${prefix}_${suffix}`.slice(0, 30);
@@ -302,11 +305,14 @@ test('Round five recommendation feed, event privacy, reset, and cascade', async 
 
     const deleted = await createUser('r5_delete');
     const owned = await createReel(deleted, 'delete cascade');
-    const history = await prisma.reelImpression.create({ data: { requestId: `r5-delete-${suffix}`, userId: deleted.id, reelId: owned.reel.id, creatorId: visibleCreator.id, sessionId: `r5-${suffix}`, position: 0, servedAt: new Date(), candidateSource: 'FRESH' } });
+    const recommendationRequestId = `r5-delete-${suffix}`;
+    await prisma.recommendationRequest.create({ data: { id: recommendationRequestId, userId: deleted.id, sessionId: `r5-${suffix}`, feedSize: 1, featureSchemaVersion: 'gather-reco-v1', provider: 'cold_start_v1' } });
+    const history = await prisma.reelImpression.create({ data: { requestId: recommendationRequestId, userId: deleted.id, reelId: owned.reel.id, creatorId: visibleCreator.id, sessionId: `r5-${suffix}`, position: 0, servedAt: new Date(), candidateSource: 'FRESH' } });
     await prisma.reelEvent.create({ data: { eventId: `r5-delete-event-${suffix}`, type: 'IMPRESSION_VISIBLE', userId: deleted.id, reelId: owned.reel.id, creatorId: visibleCreator.id, impressionId: history.id, occurredAt: new Date() } });
     await prisma.userCreatorAffinity.create({ data: { userId: deleted.id, creatorId: visibleCreator.id, score: 1, lastInteractionAt: new Date() } });
     await prisma.userRecoFeatures.create({ data: { userId: deleted.id, features: {}, computedAt: new Date() } });
     await request(app).delete('/api/users/me').set('Cookie', await cookieFor(deleted)).send({ confirmUsername: deleted.username }).expect(200);
+    assert.equal(await prisma.recommendationRequest.count({ where: { id: recommendationRequestId } }), 0);
     assert.equal(await prisma.reelImpression.count({ where: { userId: deleted.id } }), 0);
     assert.equal(await prisma.reelEvent.count({ where: { userId: deleted.id } }), 0);
     assert.equal(await prisma.userCreatorAffinity.count({ where: { userId: deleted.id } }), 0);
