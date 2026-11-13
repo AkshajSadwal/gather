@@ -26,3 +26,4 @@ minio.license
 *.md
 !README.md
 !**/README.md
+node_modules/
