@@ -2,6 +2,7 @@ let failures = 0;
 let circuitOpenUntil = 0;
 const FAILURE_THRESHOLD = 3;
 const CIRCUIT_MS = 15_000;
+const MODEL_MODE = 'kuairand_zero_shot_v1';
 
 async function recommend(payload) {
   const baseUrl = process.env.REELS_RECOMMENDER_URL;
@@ -22,6 +23,7 @@ async function recommend(payload) {
       throw new Error(`service returned ${response.status}`);
     }
     const result = await response.json();
+    if (result.mode !== MODEL_MODE || result.trainingDomain !== 'KuaiRand-1K') throw new Error('service model mode mismatch');
     if (result.featureSchemaVersion !== 'gather-reco-v1' || result.featureSchemaFingerprint !== schemaFingerprint) throw new Error('service feature schema mismatch');
     failures = 0;
     return result;
