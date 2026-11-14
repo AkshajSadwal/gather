@@ -156,8 +156,9 @@ test('persistent imports resume after restart, preserve OCI media references, an
   const storageAdapter = {
     putFile: async (_filename, objectKey, contentType) => {
       if (objectKey.includes('/posts/') && failFirstImage) {
+        storedObjects.set(objectKey, contentType);
         failFirstImage = false;
-        throw new Error('simulated storage outage');
+        throw new Error('simulated storage timeout after object write');
       }
       storedObjects.set(objectKey, contentType);
     },
@@ -189,7 +190,8 @@ test('persistent imports resume after restart, preserve OCI media references, an
   assert.equal(partiallyFailed.status, 'completed_with_errors', JSON.stringify({ job: partiallyFailed, warnings }));
   assert.equal(partiallyFailed.createdReels, 1);
   assert.equal(partiallyFailed.failedFiles, 1);
-  assert.equal(partiallyFailed.errors[0].message.includes('simulated storage outage'), false);
+  assert.equal(partiallyFailed.errors[0].message.includes('simulated storage timeout'), false);
+  assert.equal([...storedObjects.keys()].some((key) => key.includes('/posts/')), false);
 
   const retried = await afterRestart.retryJob({ file: await makeUpload(directory), jobId: firstJob.id, requestedBy: adminId, requestedByUsername: 'trusted_admin' });
   assert.equal(retried.retryOf, firstJob.id);

@@ -307,14 +307,16 @@ function createBulkImportService(dependencies = {}) {
     return Boolean(postMedia || reelMedia);
   }
 
+  async function cleanupUnreferencedObject(objectKey) {
+    try { if (!await objectIsReferenced(objectKey)) await deleteObject(objectKey); } catch { /* Preserve data when reference state is uncertain. */ }
+  }
+
   async function importImage({ filePath, job, digest, size }) {
     const objectKey = `bulk-imports/${job.targetUserId}/posts/${digest}.jpg`;
     if (await prisma.postMedia.findFirst({ where: { objectKey }, select: { id: true } })) return 'skipped';
     const url = `s3://${storage.bucket}/${objectKey}`;
-    let uploaded = false;
     try {
       await putFile(filePath, objectKey, 'image/jpeg');
-      uploaded = true;
       await prisma.post.create({
         data: {
           authorId: job.targetUserId,
@@ -324,9 +326,7 @@ function createBulkImportService(dependencies = {}) {
       });
       return 'created';
     } catch (error) {
-      if (uploaded) {
-        try { if (!await objectIsReferenced(objectKey)) await deleteObject(objectKey); } catch { /* Preserve data when reference state is uncertain. */ }
-      }
+      await cleanupUnreferencedObject(objectKey);
       throw error;
     }
   }
@@ -335,10 +335,8 @@ function createBulkImportService(dependencies = {}) {
     const objectKey = `bulk-imports/${job.targetUserId}/reels/${digest}.mp4`;
     if (await prisma.reelMedia.findFirst({ where: { objectKey }, select: { id: true } })) return 'skipped';
     const url = `s3://${storage.bucket}/${objectKey}`;
-    let uploaded = false;
     try {
       await putFile(filePath, objectKey, 'video/mp4');
-      uploaded = true;
       await prisma.$transaction(async (tx) => {
         const post = await tx.post.create({
           data: {
@@ -359,9 +357,7 @@ function createBulkImportService(dependencies = {}) {
       });
       return 'created';
     } catch (error) {
-      if (uploaded) {
-        try { if (!await objectIsReferenced(objectKey)) await deleteObject(objectKey); } catch { /* Preserve data when reference state is uncertain. */ }
-      }
+      await cleanupUnreferencedObject(objectKey);
       throw error;
     }
   }
