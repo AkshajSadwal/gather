@@ -97,7 +97,7 @@ export default function ReelsView() {
     initRecoTrackerLifecycle();
     const path = status === 'authenticated' ? `/reels/feed?size=10&sessionId=${encodeURIComponent(recoSessionId())}` : '/reels?limit=24';
     api(path)
-      .then((data) => { if (!cancelled) setReels(data.items || data.reels || []); })
+      .then((data) => { if (!cancelled) { setHasMore(true); setReels(data.items || data.reels || []); } })
       .catch((error) => { if (!cancelled) notify(error.message, 'error'); })
       .finally(() => { if (!cancelled) setBusy(false); });
     return () => { cancelled = true; };
@@ -195,9 +195,13 @@ export default function ReelsView() {
     loadingMore.current = true;
     setLoadingMoreState(true);
     try {
-      const exclude = reels.map((reel) => reel.id).join(',');
-      const data = await api(`/reels/feed?size=10&sessionId=${encodeURIComponent(recoSessionId())}&exclude=${encodeURIComponent(exclude)}`);
-      const additions = data.items || [];
+      const excludeReelIds = reels.map((reel) => reel.id);
+      if (excludeReelIds.length > 5000) { setHasMore(false); return 0; }
+      const data = await api(`/reels/feed?size=10&sessionId=${encodeURIComponent(recoSessionId())}`, {
+        method: 'POST', body: JSON.stringify({ excludeReelIds })
+      });
+      const loaded = new Set(excludeReelIds);
+      const additions = (data.items || []).filter((reel) => !loaded.has(reel.id));
       if (additions.length) setReels((items) => [...items, ...additions]);
       else setHasMore(false);
       return additions.length;
@@ -350,6 +354,7 @@ export default function ReelsView() {
       setFile(null);
       setCaption('');
       const result = status === 'authenticated' ? await api(`/reels/feed?size=10&sessionId=${encodeURIComponent(recoSessionId())}`) : await api('/reels?limit=24');
+      setHasMore(true);
       setReels(result.items || result.reels || []);
     } catch (error) {
       notify(error.message, 'error');

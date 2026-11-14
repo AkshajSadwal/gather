@@ -256,7 +256,9 @@ test('Round five recommendation feed, event privacy, reset, and cascade', async 
   };
   const createReel = async (author, caption, archivedAt = null) => {
     const post = await prisma.post.create({ data: { authorId: author.id, caption, ...(archivedAt ? { archivedAt } : {}) } });
-    const reel = await prisma.reel.create({ data: { authorId: author.id, postId: post.id, caption } });
+    const reel = await prisma.reel.create({ data: { authorId: author.id, postId: post.id, caption,
+      media: { create: { url: '/uploads/reco-test.mp4', mimeType: 'video/mp4', sizeBytes: 1024 } }
+    } });
     return { post, reel };
   };
   try {
@@ -291,6 +293,29 @@ test('Round five recommendation feed, event privacy, reset, and cascade', async 
     const wrongOwner = await request(app).post('/api/reco/events').set('Cookie', await cookieFor(outsider)).send({ events: [{ ...event, eventId: `r5-owned-${suffix}` }] }).expect(200);
     assert.equal(wrongOwner.body.data.rejected, 1);
 
+    const { countQualifiedReels } = require('../backend/src/services/recommender/discovery');
+    assert.equal(await countQualifiedReels(prisma, viewer.id), 0);
+    const historyReels = await prisma.reel.createManyAndReturn({ data: Array.from({ length: 49 }, () => ({
+      authorId: visibleCreator.id, durationMs: 2000
+    })), select: { id: true } });
+    await prisma.reelEvent.createMany({ data: historyReels.slice(0, 48).map(({ id }, index) => ({
+      eventId: `r5-history-${suffix}-${index}`, userId: viewer.id, reelId: id, type: 'SAVE', occurredAt: new Date()
+    })) });
+    await prisma.reelImpression.create({ data: {
+      requestId: feed.body.data.requestId, userId: viewer.id, reelId: historyReels[48].id, creatorId: visibleCreator.id,
+      sessionId: `r5-${suffix}`, position: 100, servedAt: new Date(), watchMs: 1000, candidateSource: 'EXPLORE'
+    } });
+    assert.equal(await countQualifiedReels(prisma, viewer.id), 49);
+    const watch = { ...event, eventId: `r5-watch-${suffix}`, type: 'WATCH_PROGRESS', payload: { watchMs: 2999 } };
+    await request(app).post('/api/reco/events').set('Cookie', viewerCookie).send({ events: [watch, watch] }).expect(200);
+    assert.equal(await countQualifiedReels(prisma, viewer.id), 49);
+    await request(app).post('/api/reco/events').set('Cookie', viewerCookie).send({ events: [{ ...watch, eventId: `r5-watch-final-${suffix}`, payload: { watchMs: 1 } }] }).expect(200);
+    assert.equal(await countQualifiedReels(prisma, viewer.id), 50);
+    await prisma.reelEvent.create({ data: {
+      eventId: `r5-overlap-${suffix}`, userId: viewer.id, reelId: visible.reel.id, type: 'LIKE', occurredAt: new Date()
+    } });
+    assert.equal(await countQualifiedReels(prisma, viewer.id), 50);
+
     await request(app).patch('/api/users/me/reco-settings').set('Cookie', viewerCookie).send({ personalizedRecs: false }).expect(200);
     const disabled = await request(app).post('/api/reco/events').set('Cookie', viewerCookie).send({ events: [{ ...event, eventId: `r5-disabled-${suffix}` }] }).expect(200);
     assert.equal(disabled.body.data.rejected, 1);
@@ -302,6 +327,7 @@ test('Round five recommendation feed, event privacy, reset, and cascade', async 
     assert.equal(await prisma.reelImpression.count({ where: { userId: viewer.id } }), 0);
     assert.equal(await prisma.userCreatorAffinity.count({ where: { userId: viewer.id } }), 0);
     assert.equal(await prisma.userRecoFeatures.count({ where: { userId: viewer.id } }), 0);
+    assert.equal(await countQualifiedReels(prisma, viewer.id), 0);
 
     const deleted = await createUser('r5_delete');
     const owned = await createReel(deleted, 'delete cascade');

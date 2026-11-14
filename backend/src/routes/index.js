@@ -127,6 +127,7 @@ router.delete('/stories/:id', requireAuth, writeLimiter, route(stories.remove));
 router.get('/stories/:id/viewers', requireAuth, route(stories.viewers));
 router.get('/reels', maybeAuth, route(reels.list));
 router.get('/reels/feed', requireAuth, readLimiter, route(reels.feed));
+router.post('/reels/feed', requireAuth, readLimiter, route(reels.feed));
 router.post('/reels', requireAuth, uploadIpLimiter, uploadAccountLimiter, writeLimiter, upload.single('media'), route(reels.create));
 router.post('/reco/events', requireAuth, recoLimiter, route(reco.ingestEvents));
 router.patch('/users/me/reco-settings', requireAuth, writeLimiter, route(recoSettings.updateSettings));

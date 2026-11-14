@@ -1,4 +1,6 @@
 const prisma = require('../config/prisma');
+const { z } = require('zod');
+const { isAdminUsername } = require('../middleware/admin');
 const { HttpError, ok } = require('../utils/http');
 const { persistUpload, removeLocal } = require('../services/storage');
 const { getBlockedUserIds } = require('../services/blocks');
@@ -43,27 +45,45 @@ async function create(req, res) {
   return ok(res, { reel: response }, 201);
 }
 
+const MAX_FEED_EXCLUSIONS = 5000;
+const feedPageSchema = z.object({ excludeReelIds: z.array(z.string().min(1).max(64)).max(MAX_FEED_EXCLUSIONS) }).strict();
+
 async function feed(req, res) {
-  const size = Math.min(Math.max(Number(req.query.size) || 10, 1), 20);
+  const size = Math.min(Math.max(Math.trunc(Number(req.query.size)) || 10, 1), 20);
   const sessionId = String(req.query.sessionId || randomUUID()).slice(0, 128);
   const requestId = randomUUID();
-  const excludeReelIds = String(req.query.exclude || '').split(',').filter((id) => id.length <= 64).slice(0, 100);
-  const { modelVersion, provider, candidates, trackingEnabled } = await recommender.getCandidates({ userId: req.user.id, sessionId, requestId, limit: size, excludeReelIds });
+  let excludeReelIds = String(req.query.exclude || '').split(',').filter((id) => id.length > 0 && id.length <= 64).slice(0, 100);
+  if (req.method === 'POST') {
+    const parsed = feedPageSchema.safeParse(req.body);
+    if (!parsed.success) throw new HttpError(400, 'VALIDATION_ERROR', 'Send up to 5000 previously loaded Reel IDs.');
+    excludeReelIds = parsed.data.excludeReelIds;
+  }
+  excludeReelIds = [...new Set(excludeReelIds)];
+  const showDiagnostics = req.query.diagnostics === '1';
+  if (showDiagnostics) {
+    const account = await prisma.user.findUnique({ where: { id: req.user.id }, select: { username: true } });
+    if (!isAdminUsername(account?.username)) throw new HttpError(403, 'FORBIDDEN', 'Administrator access is required.');
+  }
+  const { modelVersion, provider, candidates, trackingEnabled, diagnostics } = await recommender.getCandidates({ userId: req.user.id, sessionId, requestId, limit: size, excludeReelIds });
+  const response = { requestId, modelVersion, provider, ...(showDiagnostics ? { diagnostics } : {}) };
+  res.set('Cache-Control', 'private, no-store');
   const servedAt = new Date();
   const reels = candidates.length ? await prisma.reel.findMany({ where: { id: { in: candidates.map((candidate) => candidate.reelId) } }, include: { author: { select: { id: true, username: true, image: true, createdAt: true, profile: { select: { displayName: true, visibility: true } } } }, media: true, post: { include: { _count: { select: { likes: true, comments: true } }, likes: { where: { userId: req.user.id }, select: { id: true }, take: 1 }, bookmarks: { where: { userId: req.user.id }, select: { id: true }, take: 1 }, hashtags: { include: { hashtag: { select: { tag: true } } } } } } } }) : [];
   const reelById = new Map(reels.map((reel) => [reel.id, reel]));
   let safeCandidates = candidates.filter((candidate) => reelById.has(candidate.reelId));
+  let followed = new Set();
   if (safeCandidates.length) {
     const [blockedIds, mutedIds, acceptedFollows] = await Promise.all([
       getBlockedUserIds(req.user.id), mutedIdsFor(req.user.id),
       prisma.follow.findMany({ where: { followerId: req.user.id, accepted: true }, select: { followedId: true } })
     ]);
     const hidden = new Set([...blockedIds, ...mutedIds, req.user.id]);
-    const followed = new Set(acceptedFollows.map((row) => row.followedId));
+    followed = new Set(acceptedFollows.map((row) => row.followedId));
     safeCandidates = safeCandidates.filter((candidate) => {
       const reel = reelById.get(candidate.reelId);
       return reel && reel.authorId !== req.user.id && !hidden.has(reel.authorId) && !reel.post?.archivedAt &&
-        (reel.author.profile?.visibility !== 'PRIVATE' || reel.authorId === req.user.id || followed.has(reel.authorId));
+        reel.media.some((media) => media.url.trim() && media.sizeBytes > 0) &&
+        (reel.author.profile?.visibility === 'PUBLIC' || followed.has(reel.authorId));
     });
   }
   if (trackingEnabled) {
@@ -101,7 +121,7 @@ async function feed(req, res) {
       reelFeaturesSnapshot: snapshotsByReel.get(candidate.reelId).reel
     })) });
   }
-  if (!safeCandidates.length) return ok(res, { requestId, modelVersion, provider, items: [] });
+  if (!safeCandidates.length) return ok(res, { ...response, items: [] });
   if (trackingEnabled) await Promise.all(safeCandidates.map((candidate) => prisma.reelStatsDaily.upsert({
     where: { reelId_day: { reelId: candidate.reelId, day: new Date(Date.UTC(servedAt.getUTCFullYear(), servedAt.getUTCMonth(), servedAt.getUTCDate())) } },
     create: { reelId: candidate.reelId, day: new Date(Date.UTC(servedAt.getUTCFullYear(), servedAt.getUTCMonth(), servedAt.getUTCDate())), impressions: 1 },
@@ -113,9 +133,9 @@ async function feed(req, res) {
     const reel = reelById.get(candidate.reelId);
     const impression = impressionByReel.get(candidate.reelId);
     if (!reel || (trackingEnabled && !impression)) return [];
-    return [{ ...reel, isFollowing: candidate.candidateSource === 'FOLLOWING', isFollowPending: false, post: reel.post ? { ...reel.post, isLiked: !!reel.post.likes.length, isBookmarked: !!reel.post.bookmarks.length, likes: undefined, bookmarks: undefined } : null, ...(impression ? { impressionId: impression.id, position: impression.position, candidateSource: impression.candidateSource } : {}) }];
+    return [{ ...reel, isFollowing: followed.has(reel.authorId), isFollowPending: false, post: reel.post ? { ...reel.post, isLiked: !!reel.post.likes.length, isBookmarked: !!reel.post.bookmarks.length, likes: undefined, bookmarks: undefined } : null, ...(impression ? { impressionId: impression.id, position: impression.position, candidateSource: impression.candidateSource } : {}) }];
   });
-  return ok(res, { requestId, modelVersion, provider, items });
+  return ok(res, { ...response, items });
 }
 
 module.exports = { list, create, feed };
