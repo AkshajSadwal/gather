@@ -1,16 +1,14 @@
 const { randomUUID } = require('node:crypto');
 const { z } = require('zod');
 const prisma = require('../config/prisma');
-const { isBlockedBetween } = require('./blocks');
-const { mutedIdsFor } = require('./relations');
 let eventPrisma = prisma;
-let eventBlockCheck = isBlockedBetween;
-let eventMutedLookup = mutedIdsFor;
+let eventBlockCheck = null;
+let eventMutedLookup = null;
 
 function setReelEventDependenciesForTests(overrides = {}) {
   eventPrisma = overrides.prisma || prisma;
-  eventBlockCheck = overrides.isBlockedBetween || isBlockedBetween;
-  eventMutedLookup = overrides.mutedIdsFor || mutedIdsFor;
+  eventBlockCheck = overrides.isBlockedBetween || null;
+  eventMutedLookup = overrides.mutedIdsFor || null;
 }
 
 function resetReelEventDependenciesForTests() {
@@ -157,7 +155,14 @@ async function recordReelEvent(userId, input, { allowClientTypes = false } = {})
       reel = await tx.reel.findUnique({ where: { id: input.reelId }, select: { id: true, authorId: true, durationMs: true, post: { select: { archivedAt: true } }, author: { select: { profile: { select: { visibility: true } } } } } });
       if (!reel || (reel.post?.archivedAt && reel.authorId !== userId)) return { accepted: false, rejected: true };
       if (reel.authorId !== userId) {
-        if (await eventBlockCheck(userId, reel.authorId) || (await eventMutedLookup(userId)).includes(reel.authorId)) return { accepted: false, rejected: true };
+        const block = eventBlockCheck
+          ? await eventBlockCheck(userId, reel.authorId)
+          : await tx.block.findFirst({ where: { OR: [{ blockerId: userId, blockedId: reel.authorId }, { blockerId: reel.authorId, blockedId: userId }] }, select: { id: true } });
+        if (block) return { accepted: false, rejected: true };
+        const mute = eventMutedLookup
+          ? (await eventMutedLookup(userId)).includes(reel.authorId)
+          : await tx.mute.findUnique({ where: { muterId_mutedId: { muterId: userId, mutedId: reel.authorId } }, select: { id: true } });
+        if (mute) return { accepted: false, rejected: true };
         if (reel.author.profile?.visibility === 'PRIVATE') {
           const follow = await tx.follow.findUnique({ where: { followerId_followedId: { followerId: userId, followedId: reel.authorId } }, select: { accepted: true } });
           if (!follow?.accepted) return { accepted: false, rejected: true };

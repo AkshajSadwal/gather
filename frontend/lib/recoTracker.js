@@ -2,9 +2,12 @@ import { api } from './api';
 
 const MAX_QUEUE = 200;
 const BATCH_SIZE = 20;
+const RETRY_DELAYS_MS = [5000, 10000, 30000, 60000];
 let queue = [];
 let timer;
 let flushing = false;
+let retryAttempt = 0;
+let retryAfter = 0;
 
 function uuid() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -29,15 +32,21 @@ export function trackReelEvent(event) {
 }
 
 export async function flushRecoEvents(keepalive = false) {
-  if (flushing || !queue.length) return;
+  if (flushing || !queue.length || Date.now() < retryAfter) return false;
   flushing = true;
   const batch = queue.splice(0, BATCH_SIZE);
   try {
-    const events = batch.map(({ _retried, ...event }) => event);
-    await api('/reco/events', { method: 'POST', body: JSON.stringify({ events }), keepalive });
+    await api('/reco/events', { method: 'POST', body: JSON.stringify({ events: batch }), keepalive });
+    retryAttempt = 0;
+    retryAfter = 0;
+    return true;
   } catch {
-    const retry = batch.filter((event) => !event._retried).map((event) => ({ ...event, _retried: true }));
-    queue = [...retry, ...queue].slice(-MAX_QUEUE);
+    // Preserve the original event IDs so a retry is safe if the server committed
+    // the batch but its response was lost. Keep failed events ahead of newer ones.
+    queue = [...batch, ...queue].slice(0, MAX_QUEUE);
+    retryAfter = Date.now() + RETRY_DELAYS_MS[Math.min(retryAttempt, RETRY_DELAYS_MS.length - 1)];
+    retryAttempt = Math.min(retryAttempt + 1, RETRY_DELAYS_MS.length - 1);
+    return false;
   } finally {
     flushing = false;
   }

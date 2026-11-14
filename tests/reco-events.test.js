@@ -5,13 +5,15 @@ const {
 } = require('../backend/src/services/recoEvents');
 
 function fakeEventDatabase({ createCounts = [1], impression = {} } = {}) {
-  const calls = { create: 0, update: 0, affinity: 0, stats: 0 };
+  const calls = { create: 0, update: 0, affinity: 0, stats: 0, block: 0, mute: 0 };
   const tx = {
     user: { findUnique: async () => ({ personalizedRecs: true }) },
     reel: { findUnique: async ({ where }) => ({
       id: where.id, authorId: 'creator-1', durationMs: 10000, post: { archivedAt: null },
       author: { profile: { visibility: 'PUBLIC' } }
     }) },
+    block: { findFirst: async () => { calls.block += 1; return null; } },
+    mute: { findUnique: async () => { calls.mute += 1; return null; } },
     follow: { findUnique: async () => null },
     reelImpression: {
       findUnique: async () => ({
@@ -37,18 +39,18 @@ const base = { eventId: 'evt-once', type: 'LIKE', reelId: 'reel-1', impressionId
 
 test('duplicate event delivery is idempotent and applies one action update', async () => {
   const db = fakeEventDatabase({ createCounts: [1, 0] });
-  setReelEventDependenciesForTests({ prisma: db.prisma, isBlockedBetween: async () => false, mutedIdsFor: async () => [] });
+  setReelEventDependenciesForTests({ prisma: db.prisma });
   try {
     assert.deepEqual(await recordReelEvent('viewer-1', base), { accepted: true, duplicate: false });
     assert.deepEqual(await recordReelEvent('viewer-1', base), { accepted: false, duplicate: true });
-    assert.deepEqual(db.calls, { create: 2, update: 1, affinity: 1, stats: 1 });
+    assert.deepEqual(db.calls, { create: 2, update: 1, affinity: 1, stats: 1, block: 2, mute: 2 });
   } finally { resetReelEventDependenciesForTests(); }
 });
 
 test('impression ownership and reel relationships reject forged event attribution', async () => {
   for (const overrides of [{ impression: { userId: 'other-viewer' } }, { impression: { reelId: 'other-reel' } }]) {
     const db = fakeEventDatabase(overrides);
-    setReelEventDependenciesForTests({ prisma: db.prisma, isBlockedBetween: async () => false, mutedIdsFor: async () => [] });
+    setReelEventDependenciesForTests({ prisma: db.prisma });
     try {
       const input = { ...base, reelId: overrides.impression?.reelId === 'other-reel' ? 'reel-1' : base.reelId };
       const result = await recordReelEvent('viewer-1', input);
@@ -57,7 +59,7 @@ test('impression ownership and reel relationships reject forged event attributio
     } finally { resetReelEventDependenciesForTests(); }
   }
   const db = fakeEventDatabase();
-  setReelEventDependenciesForTests({ prisma: db.prisma, isBlockedBetween: async () => false, mutedIdsFor: async () => [] });
+  setReelEventDependenciesForTests({ prisma: db.prisma });
   try {
     const result = await recordReelEvent('viewer-1', { ...base, reelId: 'forged-reel' });
     assert.equal(result.rejected, true);
