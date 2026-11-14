@@ -19,6 +19,7 @@ const relations = require('../controllers/relationController');
 const account = require('../controllers/accountController');
 const reco = require('../controllers/recoController');
 const recoSettings = require('../controllers/recoSettingsController');
+const bulkImports = require('./bulkImports');
 
 const router = express.Router();
 const accountOrIpKey = (req) => req.user?.id ? `user:${req.user.id}` : `ip:${ipKeyGenerator(req.ip)}`;
@@ -75,6 +76,7 @@ router.get('/follows/requests', requireAuth, route(users.followRequests));
 router.patch('/follows/requests/:id', requireAuth, route(users.updateFollowRequest));
 router.get('/search', maybeAuth, searchLimiter, route(users.search));
 router.post('/reports', requireAuth, reportLimiter, route(reports.create));
+router.use('/admin/bulk-imports', bulkImports);
 router.get('/admin/reports', requireAuth, requireAdmin, readLimiter, route(reports.listForAdmin));
 router.patch('/admin/reports/:id', requireAuth, requireAdmin, writeLimiter, route(reports.review));
 router.get('/admin/moderation-history', requireAuth, requireAdmin, readLimiter, route(reports.moderationHistory));
