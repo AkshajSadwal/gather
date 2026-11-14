@@ -17,10 +17,7 @@ function fixture() {
     (where.AND || []).every((condition) => !(condition.id?.notIn || []).includes(reel.id)) &&
     !(where.impressions?.none.OR && state.served.includes(reel.id)));
   const prisma = {
-    user: {
-      findUnique: async () => ({ personalizedRecs: state.enabled, recsResetAt: state.resetAt }),
-      findMany: async ({ where }) => [...new Set(matching(where.reels.some).map((reel) => reel.authorId))].map((id) => ({ id }))
-    },
+    user: { findUnique: async () => ({ personalizedRecs: state.enabled, recsResetAt: state.resetAt }) },
     $queryRaw: async (query) => {
       assert.equal(query.values[0], 'viewer');
       assert.deepEqual(query.values[1], state.resetAt || new Date(0));
@@ -32,10 +29,10 @@ function fixture() {
     reelImpression: { findMany: async () => [] },
     reelStatsDaily: { groupBy: async () => [] },
     reel: {
-      aggregate: async ({ where }) => {
-        const matchingCreator = reels.filter((reel) => reel.authorId === where.authorId);
-        return { _min: { createdAt: matchingCreator[0].createdAt }, _max: { createdAt: matchingCreator.at(-1).createdAt } };
-      },
+      groupBy: async ({ where }) => [...new Set(matching(where).map((reel) => reel.authorId))].map((authorId) => {
+        const group = matching(where).filter((reel) => reel.authorId === authorId);
+        return { authorId, _min: { createdAt: group[0].createdAt }, _max: { createdAt: group.at(-1).createdAt } };
+      }),
       findMany: async ({ where, take }) => {
         if (where.id?.in) return reels.filter((reel) => where.id.in.includes(reel.id));
         const [eligible, { authorId, createdAt }] = where.AND;

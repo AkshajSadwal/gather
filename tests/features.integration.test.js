@@ -283,6 +283,13 @@ test('Round five recommendation feed, event privacy, reset, and cascade', async 
     assert.equal(feedIds.includes(visible.reel.id), true);
     const repeatFeed = await request(app).get(`/api/reels/feed?sessionId=r5-${suffix}&size=20`).set('Cookie', viewerCookie).expect(200);
     assert.equal(repeatFeed.body.data.items.some((item) => item.id === visible.reel.id), false);
+    const nextVisible = await createReel(visibleCreator, 'next page');
+    const page = await request(app).post(`/api/reels/feed?sessionId=r5-${suffix}&size=10`)
+      .set('Cookie', viewerCookie).send({ excludeReelIds: feedIds }).expect(200);
+    assert.deepEqual(page.body.data.items.map((item) => item.id), [nextVisible.reel.id]);
+    assert.equal(page.body.data.items[0].impressionId.length > 0, true);
+    await request(app).post('/api/reels/feed').send({ excludeReelIds: [] }).expect(401);
+    await request(app).post('/api/reels/feed').set('Cookie', viewerCookie).send({ excludeReelIds: 'invalid' }).expect(400);
     const impression = feed.body.data.items.find((item) => item.id === visible.reel.id);
     const event = { eventId: `r5-event-${suffix}`, type: 'IMPRESSION_VISIBLE', reelId: visible.reel.id, impressionId: impression.impressionId, sessionId: `r5-${suffix}`, payload: { visibleMs: 2500 } };
     const first = await request(app).post('/api/reco/events').set('Cookie', viewerCookie).send({ events: [event] }).expect(200);

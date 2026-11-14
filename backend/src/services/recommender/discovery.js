@@ -39,22 +39,21 @@ function stableOrder(items, seed, key) {
 }
 
 async function sampleCatalogue(db, { where, select, seed, limit }) {
-  const creators = await db.user.findMany({ where: { reels: { some: where } }, select: { id: true } });
+  const creators = await db.reel.groupBy({
+    by: ['authorId'], where, _min: { createdAt: true }, _max: { createdAt: true }
+  });
   if (!creators.length) return [];
-  const ordered = stableOrder(creators, seed, (creator) => creator.id).slice(0, Math.max(12, limit + 4));
+  const ordered = stableOrder(creators, seed, (creator) => creator.authorId).slice(0, Math.max(12, limit + 4));
   const perCreator = Math.max(REELS_PER_CREATOR, Math.ceil(limit / creators.length));
   const sampled = [];
   for (let start = 0; start < ordered.length; start += 5) {
-    const groups = await Promise.all(ordered.slice(start, start + 5).map(async ({ id }) => {
-      // The existing (authorId, createdAt) index supports both date bounds and seeks.
-      const dates = await db.reel.aggregate({ where: { authorId: id }, _min: { createdAt: true }, _max: { createdAt: true } });
-      if (!dates._min.createdAt || !dates._max.createdAt) return [];
-      const min = dates._min.createdAt.getTime();
-      const max = dates._max.createdAt.getTime();
-      const fraction = createHash('sha256').update(JSON.stringify([seed, id])).digest().readUInt32BE() / 2 ** 32;
+    const groups = await Promise.all(ordered.slice(start, start + 5).map(async ({ authorId, _min, _max }) => {
+      const min = _min.createdAt.getTime();
+      const max = _max.createdAt.getTime();
+      const fraction = createHash('sha256').update(JSON.stringify([seed, authorId])).digest().readUInt32BE() / 2 ** 32;
       const pivot = new Date(min + Math.floor((max - min) * fraction));
       const read = (createdAt, take) => db.reel.findMany({
-        where: { AND: [where, { authorId: id, createdAt }] },
+        where: { AND: [where, { authorId, createdAt }] },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take, select
       });
       const tail = await read({ gte: pivot }, perCreator);
