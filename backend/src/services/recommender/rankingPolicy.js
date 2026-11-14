@@ -1,8 +1,22 @@
 function isReelEligible(reel, { userId, hiddenIds, followedIds, personalizationEnabled, affinity }) {
-  if (hiddenIds.has(reel.authorId) || reel.post?.archivedAt) return false;
+  if (reel.authorId === userId || hiddenIds.has(reel.authorId) || reel.post?.archivedAt) return false;
   const visibility = reel.author?.profile?.visibility;
   if (visibility === 'PRIVATE' && reel.authorId !== userId && !followedIds.has(reel.authorId)) return false;
   return !personalizationEnabled || (affinity.get(reel.authorId) ?? 0) > -3;
+}
+
+function buildReelCandidateWhere({ userId, hiddenIds = [], followedIds = [], excludedIds = [] }) {
+  const hidden = [...new Set([...hiddenIds, userId])];
+  const followed = [...new Set(followedIds)].filter((id) => id !== userId);
+  return {
+    authorId: { notIn: hidden },
+    AND: [{ OR: [{ post: { is: { archivedAt: null } } }, { post: { is: null } }] }],
+    OR: [
+      ...(followed.length ? [{ authorId: { in: followed } }] : []),
+      { author: { is: { profile: { is: { visibility: 'PUBLIC' } } } } }
+    ],
+    ...(excludedIds.length ? { id: { notIn: excludedIds } } : {})
+  };
 }
 
 function applyModelRanking(candidatePool, ranked) {
@@ -23,4 +37,4 @@ function applyModelRanking(candidatePool, ranked) {
   return trusted.length === candidatePool.length ? trusted : null;
 }
 
-module.exports = { isReelEligible, applyModelRanking };
+module.exports = { isReelEligible, buildReelCandidateWhere, applyModelRanking };

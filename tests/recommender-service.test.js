@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { recommend } = require('../backend/src/services/recommender/modelService');
-const { isReelEligible, applyModelRanking } = require('../backend/src/services/recommender/rankingPolicy');
+const { isReelEligible, buildReelCandidateWhere, applyModelRanking } = require('../backend/src/services/recommender/rankingPolicy');
 
 const schemaFingerprint = 'cd94509ad053c55cb973f5dea69546900e3c6d35fc15e90d7308fdbfb46ab82a';
 
@@ -41,7 +41,7 @@ test('model service accepts only the configured Gather feature contract', async 
   }
 });
 
-test('privacy policy filters blocked, muted, private and archived reels before ranking', () => {
+test('privacy policy filters own, blocked, muted, private and archived reels before ranking', () => {
   const blockedIds = new Set(['blocked-author', 'muted-author']);
   const followedIds = new Set(['private-followed']);
   const affinity = new Map();
@@ -56,8 +56,22 @@ test('privacy policy filters blocked, muted, private and archived reels before r
   assert.equal(eligible(reel('muted-author')), false);
   assert.equal(eligible(reel('private-owner', 'PRIVATE')), false);
   assert.equal(eligible(reel('private-followed', 'PRIVATE')), true);
-  assert.equal(eligible(reel('viewer', 'PRIVATE')), true);
+  assert.equal(eligible(reel('viewer', 'PRIVATE')), false);
+  assert.equal(eligible(reel('viewer', 'PUBLIC')), false);
   assert.equal(eligible(reel('public-author', 'PUBLIC', new Date())), false);
+});
+
+test('reel candidate query excludes own content before retrieval limits and preserves eligibility filters', () => {
+  const where = buildReelCandidateWhere({
+    userId: 'viewer', hiddenIds: ['blocked', 'muted'], followedIds: ['viewer', 'followed'], excludedIds: ['seen-reel']
+  });
+  assert.deepEqual(where.authorId.notIn, ['blocked', 'muted', 'viewer']);
+  assert.deepEqual(where.OR, [
+    { authorId: { in: ['followed'] } },
+    { author: { is: { profile: { is: { visibility: 'PUBLIC' } } } } }
+  ]);
+  assert.deepEqual(where.id.notIn, ['seen-reel']);
+  assert.equal(where.AND[0].OR[0].post.is.archivedAt, null);
 });
 
 test('model ranking can only reorder eligible IDs and preserves source labels', () => {

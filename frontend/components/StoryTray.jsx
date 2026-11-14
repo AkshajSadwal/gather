@@ -3,8 +3,10 @@
 import Link from 'next/link';
 import { createPortal } from 'react-dom';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Plus, X, Trash2, Eye, LoaderCircle, RefreshCw } from 'lucide-react';
+import { Plus, X, Trash2, Eye, LoaderCircle, RefreshCw, Volume2, VolumeX } from 'lucide-react';
 import { api, mediaUrl } from '../lib/api';
+import { normalizeMediaSource } from '../lib/mediaSource.mjs';
+import { detectVideoAudio, playVideoWithSoundFallback, readReelMutedPreference, setVideoMuted, writeReelMutedPreference } from '../lib/reelPlayback.mjs';
 import { useToast } from './Providers';
 import { useSession } from 'next-auth/react';
 import Avatar from './Avatar';
@@ -15,6 +17,8 @@ export default function StoryTray() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [viewer, setViewer] = useState(null);
+  const [storyMuted, setStoryMuted] = useState(false);
+  const [storyHasAudio, setStoryHasAudio] = useState(true);
   const [storyViewers, setStoryViewers] = useState(null);
   const [viewersOpen, setViewersOpen] = useState(false);
   const [viewersBusy, setViewersBusy] = useState(false);
@@ -28,6 +32,8 @@ export default function StoryTray() {
   const [replyDraft, setReplyDraft] = useState('');
   const [replyBusy, setReplyBusy] = useState(false);
   const fileRef = useRef(null);
+  const storyVideoRef = useRef(null);
+  const storyMutedPreference = useRef(false);
   const notify = useToast();
   const loadStories = useCallback(async () => {
     setLoadError('');
@@ -55,6 +61,12 @@ export default function StoryTray() {
     setPreviewUrl(url);
     return () => URL.revokeObjectURL(url);
   }, [draftFile]);
+  useEffect(() => {
+    try {
+      storyMutedPreference.current = readReelMutedPreference(window.sessionStorage);
+      setStoryMuted(storyMutedPreference.current);
+    } catch {}
+  }, []);
 
   const publishStory = async () => {
     if (!draftFile || busy) return;
@@ -71,7 +83,33 @@ export default function StoryTray() {
 
   const allStories = groups.flatMap((group, groupIndex) => group.stories.map((story, storyIndex) => ({ groupIndex, storyIndex, group, story })));
   const current = viewer ? allStories.find((item) => item.groupIndex === viewer.groupIndex && item.storyIndex === viewer.storyIndex) : null;
+  const currentStoryMedia = current?.story.media?.[0];
+  const currentMediaSource = currentStoryMedia ? mediaUrl(currentStoryMedia.url) : null;
+  const previewSource = normalizeMediaSource(previewUrl);
   const ownGroup = groups.find((group) => group.user.id === session?.user?.id);
+  useEffect(() => {
+    const video = storyVideoRef.current;
+    return () => video?.pause();
+  }, [current?.story.id, currentMediaSource]);
+  const startStoryPlayback = (video) => playVideoWithSoundFallback(
+    video,
+    storyMutedPreference.current,
+    () => storyVideoRef.current === video,
+    setStoryMuted
+  );
+  const toggleStorySound = () => {
+    const video = storyVideoRef.current;
+    if (!video) return;
+    const nextMuted = !video.muted;
+    storyMutedPreference.current = nextMuted;
+    writeReelMutedPreference(window.sessionStorage, nextMuted);
+    setVideoMuted(video, nextMuted, setStoryMuted);
+    if (!nextMuted && video.paused) void startStoryPlayback(video);
+  };
+  const closeViewer = () => {
+    storyVideoRef.current?.pause();
+    setViewer(null);
+  };
   const openComposer = () => { setUploadError(''); setComposerOpen(true); };
   const closeComposer = () => {
     if (busy) return;
@@ -79,6 +117,7 @@ export default function StoryTray() {
   };
   const advance = () => {
     if (!viewer) return;
+    storyVideoRef.current?.pause();
     const group = groups[viewer.groupIndex];
     if (viewer.storyIndex + 1 < group.stories.length) setViewer({ ...viewer, storyIndex: viewer.storyIndex + 1 });
     else if (viewer.groupIndex + 1 < groups.length) setViewer({ groupIndex: viewer.groupIndex + 1, storyIndex: 0 });
@@ -86,6 +125,7 @@ export default function StoryTray() {
   };
   const retreat = () => {
     if (!viewer) return;
+    storyVideoRef.current?.pause();
     if (viewer.storyIndex > 0) setViewer({ ...viewer, storyIndex: viewer.storyIndex - 1 });
     else if (viewer.groupIndex > 0) setViewer({ groupIndex: viewer.groupIndex - 1, storyIndex: groups[viewer.groupIndex - 1].stories.length - 1 });
   };
@@ -139,7 +179,7 @@ export default function StoryTray() {
     {composerOpen && typeof document !== 'undefined' && createPortal(<div role="dialog" aria-modal="true" aria-labelledby="story-composer-title" className="fixed inset-0 z-[70] grid place-items-center bg-[rgba(10,12,20,.4)] p-3 backdrop-blur-md sm:p-6" onKeyDown={(event) => { if (event.key === 'Escape') closeComposer(); }}>
       <section className="glass-dialog max-h-[92vh] w-full max-w-xl overflow-y-auto p-5 sm:p-7" onClick={(event) => event.stopPropagation()}>
         <header className="flex items-center justify-between"><div><h2 id="story-composer-title" className="text-lg font-bold">Create a story</h2><p className="mt-1 text-xs text-ink/50">Preview your photo or video before sharing.</p></div><button type="button" aria-label="Close story composer" onClick={closeComposer} disabled={busy} className="rounded-full p-2 hover:bg-paper disabled:opacity-40"><X size={18} /></button></header>
-        {draftFile ? <div className="mt-4 overflow-hidden rounded-2xl bg-ink"><div className="grid max-h-[48vh] min-h-48 place-items-center">{draftFile.type.startsWith('video/') ? <video src={previewUrl} controls playsInline className="max-h-[48vh] w-full object-contain" /> : <img src={previewUrl} alt="Story preview" className="max-h-[48vh] w-full object-contain" />}</div></div> : <button type="button" onClick={() => fileRef.current?.click()} className="mt-4 grid min-h-48 w-full place-items-center rounded-2xl border-2 border-dashed border-line bg-paper text-sm font-semibold text-moss hover:border-moss">Choose a photo or video</button>}
+        {draftFile ? <div className="mt-4 overflow-hidden rounded-2xl bg-ink"><div className="grid max-h-[48vh] min-h-48 place-items-center">{previewSource ? draftFile.type.startsWith('video/') ? <video src={previewSource} controls playsInline className="max-h-[48vh] w-full object-contain" /> : <img src={previewSource} alt="Story preview" className="max-h-[48vh] w-full object-contain" /> : <p role="status" className="p-6 text-center text-sm text-white/70">Preparing story preview…</p>}</div></div> : <button type="button" onClick={() => fileRef.current?.click()} className="mt-4 grid min-h-48 w-full place-items-center rounded-2xl border-2 border-dashed border-line bg-paper text-sm font-semibold text-moss hover:border-moss">Choose a photo or video</button>}
         {draftFile && <div className="mt-3 flex items-center justify-between gap-3"><span className="min-w-0 truncate text-xs text-ink/50">{draftFile.name}</span><button type="button" onClick={() => fileRef.current?.click()} disabled={busy} className="shrink-0 text-xs font-semibold text-moss underline">Change media</button></div>}
         <label className="mt-4 block text-sm font-semibold" htmlFor="story-caption">Caption</label>
         <textarea id="story-caption" value={caption} onChange={(event) => setCaption(event.target.value)} maxLength={500} rows={2} placeholder="Add a caption…" className="mt-1 w-full resize-y rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-moss" />
@@ -151,11 +191,11 @@ export default function StoryTray() {
         <footer className="mt-5 flex justify-end gap-2"><button type="button" onClick={closeComposer} disabled={busy} className="rounded-xl border border-line px-4 py-2 text-sm font-semibold disabled:opacity-40">Cancel</button><button type="button" onClick={() => void publishStory()} disabled={!draftFile || busy} className="rounded-xl bg-moss px-4 py-2 text-sm font-semibold text-white disabled:opacity-45">{busy ? 'Publishing…' : 'Publish story'}</button></footer>
       </section>
     </div>, document.body)}
-    {current && typeof document !== 'undefined' && createPortal(<div role="dialog" aria-modal="true" aria-label={`Story by ${current.group.user.username}`} className="fixed inset-0 z-[60] grid place-items-center bg-[rgba(10,12,20,.4)] p-2 backdrop-blur-md sm:p-5" onKeyDown={(event) => { if (event.key === 'Escape') setViewer(null); if (event.key === 'ArrowRight') advance(); if (event.key === 'ArrowLeft') retreat(); }} tabIndex={-1}>
+    {current && typeof document !== 'undefined' && createPortal(<div role="dialog" aria-modal="true" aria-label={`Story by ${current.group.user.username}`} className="fixed inset-0 z-[60] grid place-items-center bg-[rgba(10,12,20,.4)] p-2 backdrop-blur-md sm:p-5" onKeyDown={(event) => { if (event.key === 'Escape') closeViewer(); if (event.key === 'ArrowRight') advance(); if (event.key === 'ArrowLeft') retreat(); }} tabIndex={-1}>
       <div className="story-viewer-card relative aspect-[9/16] h-[min(92dvh,820px)] w-auto max-w-[92vw] overflow-hidden rounded-[28px] bg-ink shadow-float">
-        <div className="absolute left-3 right-3 top-3 z-10 flex gap-1">{current.group.stories.map((story, i) => <span key={story.id} className="h-1 flex-1 overflow-hidden rounded bg-surface/35"><span key={`${current.story.id}-${i}`} className={`block h-full origin-left bg-surface ${i < current.storyIndex ? 'w-full' : i === current.storyIndex && story.media[0]?.type !== 'VIDEO' ? 'animate-[story-progress_7s_linear_forwards]' : i === current.storyIndex ? 'w-full' : 'w-0'}`} /></span>)}</div>
-        <div className="absolute left-3 right-3 top-7 z-10 flex items-center gap-3 text-white"><Avatar ring={current.story.audience === 'CLOSE_FRIENDS' ? 'close' : false} src={current.group.user.image} name={current.group.user.username} size="xs" /><Link href={`/profile/${current.group.user.username}`} className="flex-1 text-sm font-medium">{current.group.user.username}</Link><button aria-label="Close story" onClick={() => setViewer(null)} className="glass-pill grid h-9 w-9 place-items-center text-white"><X /></button></div>
-        {current.story.media[0]?.type === 'VIDEO' ? <video src={mediaUrl(current.story.media[0].url)} autoPlay muted playsInline onEnded={advance} className="h-full w-full object-contain" /> : <img src={mediaUrl(current.story.media[0]?.url)} alt={current.story.caption || 'Story'} className="h-full w-full object-contain" />}
+        <div className="absolute left-3 right-3 top-3 z-10 flex gap-1">{current.group.stories.map((story, i) => <span key={story.id} className="h-1 flex-1 overflow-hidden rounded bg-surface/35"><span key={`${current.story.id}-${i}`} className={`block h-full origin-left bg-surface ${i < current.storyIndex ? 'w-full' : i === current.storyIndex && story.media?.[0]?.type !== 'VIDEO' ? 'animate-[story-progress_7s_linear_forwards]' : i === current.storyIndex ? 'w-full' : 'w-0'}`} /></span>)}</div>
+        <div className="absolute left-3 right-3 top-7 z-10 flex items-center gap-3 text-white"><Avatar ring={current.story.audience === 'CLOSE_FRIENDS' ? 'close' : false} src={current.group.user.image} name={current.group.user.username} size="xs" /><Link href={`/profile/${current.group.user.username}`} className="flex-1 text-sm font-medium">{current.group.user.username}</Link>{currentStoryMedia?.type === 'VIDEO' && storyHasAudio && <button type="button" aria-label={storyMuted ? 'Unmute story sound' : 'Mute story sound'} title={storyMuted ? 'Unmute sound' : 'Mute sound'} onClick={toggleStorySound} className="glass-pill grid h-9 w-9 place-items-center text-white">{storyMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}</button>}<button type="button" aria-label="Close story" onClick={closeViewer} className="glass-pill grid h-9 w-9 place-items-center text-white"><X /></button></div>
+        {currentMediaSource ? currentStoryMedia?.type === 'VIDEO' ? <video key={current.story.id} ref={(element) => { storyVideoRef.current = element; }} src={currentMediaSource} playsInline onCanPlay={(event) => { void startStoryPlayback(event.currentTarget); }} onLoadedMetadata={(event) => { const hasAudio = detectVideoAudio(event.currentTarget); setStoryHasAudio(hasAudio ?? true); setStoryMuted(event.currentTarget.muted); }} onVolumeChange={(event) => setStoryMuted(event.currentTarget.muted)} onEnded={advance} className="h-full w-full object-contain" /> : <img src={currentMediaSource} alt={current.story.caption || 'Story'} className="h-full w-full object-contain" /> : <div role="status" className="absolute inset-0 grid place-items-center p-8 text-center text-sm text-white/70">Story media is unavailable.</div>}
         {current.story.caption && <p className="absolute bottom-10 z-10 w-full px-8 text-center text-base text-white drop-shadow">{current.story.caption}</p>}
         {current.story.authorId !== session?.user?.id && <form onSubmit={replyToStory} className="absolute inset-x-3 bottom-4 z-20 flex gap-2"><input value={replyDraft} onChange={(event) => setReplyDraft(event.target.value)} onKeyDown={(event) => event.stopPropagation()} maxLength={1000} aria-label="Reply to story" placeholder="Reply to story…" className="min-w-0 flex-1 rounded-full border border-white/40 bg-black/45 px-4 py-2.5 text-sm text-white outline-none placeholder:text-white/70" /><button disabled={replyBusy || !replyDraft.trim()} className="rounded-full bg-surface px-4 py-2 text-sm font-semibold text-ink disabled:opacity-50">{replyBusy ? 'Sending…' : 'Send'}</button></form>}
         {current.story.authorId === session?.user?.id && <button onClick={showViewers} disabled={viewersBusy} className="absolute bottom-4 left-4 z-20 flex items-center gap-2 rounded-full bg-black/35 px-3 py-2 text-sm text-white"><Eye size={16} />{viewersBusy ? 'Loading…' : `${current.story._count?.views || 0} viewers`}</button>}

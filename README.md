@@ -95,10 +95,11 @@ Set `ADMIN_USERNAMES` to a comma-separated list of lowercase or mixed-case usern
 - [Follow-up work](TODO.md)
 - [Security notes](SECURITY.md)
 - [Media storage](STORAGE.md)
+- [Production reconciliation guide](docs/deployment/production-reconciliation.md)
 
-## Kubernetes
+## Deployment notes
 
-A single-backend Kubernetes baseline is available in `k8s/` with container build files at the repository root (`Dockerfile.backend` and `Dockerfile.frontend`). See `KUBERNETES.md` and `k8s/README.md` for image builds, secrets, mediasoup networking, MinIO public media URLs, migrations, and the current single-replica limitation.
+The current Gather production deployment uses native systemd services behind Nginx on the shared Oracle Cloud VM. The Kubernetes manifests and root Dockerfiles are an optional deployment baseline, not a description of the live production topology. See the [production reconciliation guide](docs/deployment/production-reconciliation.md) before preparing any Gather release; do not use the combined VM deployment script until its scope and production-only changes have been reconciled.
 
 Reel recommendation feature snapshots refresh every `RECO_FEATURES_INTERVAL_MS` (default `600000` ms). Recommendation events and impressions are cleaned after `RECO_EVENT_RETENTION_DAYS` (default `180` days); set it to `0` to disable this cleanup.
 

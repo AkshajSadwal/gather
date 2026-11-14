@@ -1,3 +1,5 @@
+import { resolveMediaUrl } from './mediaSource.mjs';
+
 export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
 export async function api(path, options = {}) {
@@ -16,10 +18,7 @@ export async function api(path, options = {}) {
 }
 
 export function mediaUrl(url) {
-  if (!url) return '';
-  if (url.startsWith('http')) return url;
-  if (url.startsWith('s3://')) return `${API_URL}/api/media?key=${encodeURIComponent(url)}`;
-  return `${API_URL}${url}`;
+  return resolveMediaUrl(url, API_URL);
 }
 
 export function initials(value = '?') {
