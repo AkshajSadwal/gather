@@ -23,7 +23,7 @@ async function hiddenPostAuthorIds(userId) {
     postFeedDependencies.getBlockedUserIds(userId),
     postFeedDependencies.mutedIdsFor(userId)
   ]);
-  return [...new Set([...blockedIds, ...mutedIds])];
+  return [...new Set([...blockedIds, ...mutedIds, ...(userId ? [userId] : [])])];
 }
 
 const postInclude = (userId) => ({
@@ -73,7 +73,7 @@ async function feed(req, res) {
     },
     select: { followedId: true }
   });
-  const authorIds = [...following.map((row) => row.followedId), req.user.id];
+  const authorIds = following.map((row) => row.followedId);
   const posts = await postFeedDependencies.prisma.post.findMany({
     where: { authorId: { in: authorIds, notIn: hiddenIds }, archivedAt: null },
     orderBy: { createdAt: 'desc' },

@@ -32,11 +32,12 @@ function response() {
   };
 }
 
-test('home feed excludes blocked and muted authors', async () => {
+test('home feed excludes the viewer, blocked authors, and muted authors before pagination', async () => {
   const queries = setup();
   try {
     await feed({ user: { id: 'viewer' }, query: {} }, response());
-    assert.deepEqual(queries[0].authorId.notIn, ['blocked-user', 'muted-user']);
+    assert.deepEqual(queries[0].authorId.in, ['followed-user']);
+    assert.deepEqual(queries[0].authorId.notIn, ['blocked-user', 'muted-user', 'viewer']);
   } finally { resetPostFeedDependenciesForTests(); }
 });
 
@@ -44,6 +45,6 @@ test('Explore excludes blocked and muted authors', async () => {
   const queries = setup();
   try {
     await explore({ user: { id: 'viewer' }, query: {} }, response());
-    assert.deepEqual(queries[0].authorId.notIn, ['blocked-user', 'muted-user']);
+    assert.deepEqual(queries[0].authorId.notIn, ['blocked-user', 'muted-user', 'viewer']);
   } finally { resetPostFeedDependenciesForTests(); }
 });

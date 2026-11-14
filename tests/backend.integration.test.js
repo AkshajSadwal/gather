@@ -104,6 +104,10 @@ test('auth, social persistence, upload validation, messages, and call lifecycle'
     assert.equal(ownPost.authorId, firstUser.id);
     mediaUrls.push(ownPost.media[0].url);
     assert.equal(ownPost.hashtags[0].hashtag.tag, 'integration');
+    const ownerProfile = await request(app).get(`/api/users/${firstUser.username}`).set('Cookie', firstCookie).expect(200);
+    assert.equal(ownerProfile.body.data.posts.some((post) => post.id === ownPost.id), true);
+    const ownHomeFeed = await request(app).get('/api/posts/feed').set('Cookie', firstCookie).expect(200);
+    assert.equal(ownHomeFeed.body.data.posts.some((post) => post.id === ownPost.id), false);
     const secondIdentityBeforeDelete = (await request(app).get('/api/auth/me').set('Cookie', secondCookie).expect(200)).body.data.user.id;
     const persistedPostBeforeDelete = await prisma.post.findUnique({ where: { id: ownPost.id }, select: { id: true, authorId: true } });
     assert.equal(secondIdentityBeforeDelete, secondUser.id);

@@ -58,11 +58,11 @@ async function feed(req, res) {
       getBlockedUserIds(req.user.id), mutedIdsFor(req.user.id),
       prisma.follow.findMany({ where: { followerId: req.user.id, accepted: true }, select: { followedId: true } })
     ]);
-    const hidden = new Set([...blockedIds, ...mutedIds]);
+    const hidden = new Set([...blockedIds, ...mutedIds, req.user.id]);
     const followed = new Set(acceptedFollows.map((row) => row.followedId));
     safeCandidates = safeCandidates.filter((candidate) => {
       const reel = reelById.get(candidate.reelId);
-      return reel && !hidden.has(reel.authorId) && (!reel.post?.archivedAt || reel.authorId === req.user.id) &&
+      return reel && reel.authorId !== req.user.id && !hidden.has(reel.authorId) && !reel.post?.archivedAt &&
         (reel.author.profile?.visibility !== 'PRIVATE' || reel.authorId === req.user.id || followed.has(reel.authorId));
     });
   }

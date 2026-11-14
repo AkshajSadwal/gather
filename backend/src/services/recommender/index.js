@@ -2,7 +2,7 @@ const prisma = require('../../config/prisma');
 const { getBlockedUserIds } = require('../blocks');
 const { mutedIdsFor } = require('../relations');
 const modelService = require('./modelService');
-const { isReelEligible, applyModelRanking } = require('./rankingPolicy');
+const { isReelEligible, buildReelCandidateWhere, applyModelRanking } = require('./rankingPolicy');
 const { opaqueId, buildUserFeatureSnapshot, buildReelFeatureSnapshot, mergeForModel } = require('../recoFeatureSchema');
 
 const MODEL_VERSION = 'kuairand_zero_shot_v1';
@@ -18,21 +18,12 @@ async function getCandidates({ userId, sessionId, requestId, limit = 10, exclude
   const followed = new Set(follows.map((row) => row.followedId));
   const personalizationEnabled = user?.personalizedRecs !== false;
   const affinity = new Map((personalizationEnabled ? affinities : []).map((row) => [row.creatorId, row.score]));
-  const hidden = [...new Set([...blockedIds, ...mutedIds])];
+  const hidden = [...new Set([...blockedIds, ...mutedIds, userId])];
   const cutoff = new Date(Math.max(now.getTime() - 30 * 86400000, user?.recsResetAt?.getTime() || 0));
   const seen = await prisma.reelImpression.findMany({ where: { userId, servedAt: { gte: cutoff } }, select: { reelId: true } });
   const excluded = new Set([...excludeReelIds, ...seen.map((row) => row.reelId)]);
   const reels = await prisma.reel.findMany({
-    where: {
-      authorId: { notIn: hidden },
-      AND: [{ OR: [{ post: { is: { archivedAt: null } } }, { post: { is: null } }] }],
-      OR: [
-        { authorId: userId },
-        { authorId: { in: [...followed] } },
-        { author: { is: { profile: { is: { visibility: 'PUBLIC' } } } } }
-      ],
-      ...(excluded.size ? { id: { notIn: [...excluded] } } : {})
-    },
+    where: buildReelCandidateWhere({ userId, hiddenIds: hidden, followedIds: [...followed], excludedIds: [...excluded] }),
     orderBy: { createdAt: 'desc' }, take: 250,
     select: { id: true, authorId: true, createdAt: true, durationMs: true, language: true, author: { select: { createdAt: true, profile: { select: { visibility: true } }, _count: { select: { followers: { where: { accepted: true } } } } } }, media: { select: { sizeBytes: true } }, post: { select: { id: true, archivedAt: true, hashtags: { include: { hashtag: { select: { tag: true } } } } } } }
   });

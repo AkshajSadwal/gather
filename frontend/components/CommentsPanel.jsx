@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { Flag, Heart, LoaderCircle, MessageCircle, Pin, Reply, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
@@ -9,36 +9,50 @@ import Avatar from './Avatar';
 import ReportDialog from './ReportDialog';
 import { useToast } from './Providers';
 
-export default function CommentsPanel({ postId, postAuthorId, onCommentAdded, recoImpressionId }) {
+export default function CommentsPanel({ postId, postAuthorId, onCommentAdded, recoImpressionId, className = '' }) {
   const { data: session, status } = useSession();
   const [comments, setComments] = useState([]);
   const [nextCursor, setNextCursor] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
+  const [paginationError, setPaginationError] = useState('');
   const [draft, setDraft] = useState('');
   const [replyTarget, setReplyTarget] = useState(null);
   const [replies, setReplies] = useState({});
   const [busy, setBusy] = useState(false);
   const [reportingId, setReportingId] = useState('');
+  const loadingRef = useRef(false);
+  const submittingRef = useRef(false);
   const notify = useToast();
 
   const loadComments = useCallback(async (cursor = null) => {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
     if (cursor) setLoadingMore(true);
     else { setLoading(true); setError(''); }
+    setPaginationError('');
     try {
       const query = new URLSearchParams({ limit: '20' });
       if (cursor) query.set('cursor', cursor);
       const data = await api(`/posts/${encodeURIComponent(postId)}/comments?${query}`);
-      setComments((current) => cursor ? [...current, ...(data.comments || [])] : (data.comments || []));
+      setComments((current) => {
+        const incoming = data.comments || [];
+        if (!cursor) return incoming;
+        const existingIds = new Set(current.map((item) => item.id));
+        return [...current, ...incoming.filter((item) => !existingIds.has(item.id))];
+      });
       setNextCursor(data.nextCursor || null);
-    } catch (problem) { setError(problem.message); }
-    finally { setLoading(false); setLoadingMore(false); }
+    } catch (problem) {
+      if (cursor) setPaginationError(problem.message);
+      else setError(problem.message);
+    } finally { loadingRef.current = false; setLoading(false); setLoadingMore(false); }
   }, [postId]);
 
   useEffect(() => { void loadComments(); }, [loadComments]);
 
   const loadReplies = async (parentId, cursor = null) => {
+    if (replies[parentId]?.loading) return;
     setReplies((all) => ({ ...all, [parentId]: { ...(all[parentId] || {}), loading: true, error: '' } }));
     try {
       const query = new URLSearchParams({ limit: '20' });
@@ -52,7 +66,8 @@ export default function CommentsPanel({ postId, postAuthorId, onCommentAdded, re
 
   const submit = async (event) => {
     event.preventDefault();
-    if (!draft.trim() || busy || status !== 'authenticated') return;
+    if (!draft.trim() || submittingRef.current || status !== 'authenticated') return;
+    submittingRef.current = true;
     setBusy(true);
     try {
       const data = await api(`/posts/${encodeURIComponent(postId)}/comments`, {
@@ -66,7 +81,7 @@ export default function CommentsPanel({ postId, postAuthorId, onCommentAdded, re
       setReplyTarget(null);
       onCommentAdded?.();
     } catch (problem) { notify(problem.message, 'error'); }
-    finally { setBusy(false); }
+    finally { submittingRef.current = false; setBusy(false); }
   };
 
   const remove = async (item, parentId = null) => {
@@ -128,15 +143,16 @@ export default function CommentsPanel({ postId, postAuthorId, onCommentAdded, re
     </div>;
   };
 
-  return <section aria-label="Comments" className="grid gap-4">
-    <div className="max-h-[55vh] min-h-20 space-y-4 overflow-y-auto pr-1">
+  return <section data-reel-comments="true" aria-label="Comments" className={`comments-panel grid min-h-0 gap-4 ${className}`}>
+    <div tabIndex={0} aria-label="Comments list" className="comments-list max-h-[55vh] min-h-20 space-y-4 overflow-y-auto overscroll-contain pr-1">
       {loading ? <p className="py-8 text-center text-sm text-ink/50">Loading comments…</p> : error ? <div role="alert" className="py-6 text-center text-sm text-coral">{error} <button type="button" onClick={() => void loadComments()} className="underline">Retry</button></div> : comments.length ? comments.map((item) => renderComment(item)) : <p className="py-8 text-center text-sm text-ink/50">No comments yet.</p>}
     </div>
     {!loading && nextCursor && <button type="button" disabled={loadingMore} onClick={() => void loadComments(nextCursor)} className="mx-auto text-xs font-semibold text-moss disabled:opacity-50">{loadingMore ? 'Loading…' : 'Load more comments'}</button>}
+    {paginationError && <p role="alert" className="text-xs text-coral">{paginationError} <button type="button" disabled={loadingMore} onClick={() => void loadComments(nextCursor)} className="font-semibold underline">Retry loading comments</button></p>}
     {status === 'authenticated' ? <form onSubmit={submit} className="grid gap-2 border-t border-line pt-3">
       {replyTarget && <p className="flex items-center justify-between text-xs text-ink/55">Replying to @{replyTarget.user.username}<button type="button" onClick={() => setReplyTarget(null)} className="font-semibold text-moss">Cancel</button></p>}
       <div className="flex gap-2"><input value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={1000} placeholder={replyTarget ? 'Write a reply…' : 'Add a comment…'} className="min-w-0 flex-1 border-b border-line py-2 text-sm outline-none focus:border-moss" /><button type="submit" disabled={!draft.trim() || busy} className="inline-flex items-center gap-1 text-sm font-semibold text-moss disabled:opacity-40">{busy && <LoaderCircle size={14} className="animate-spin" />}Post</button></div>
-    </form> : <Link href="/login" className="border-t border-line pt-3 text-center text-sm font-semibold text-moss">Log in to comment</Link>}
+    </form> : status === 'loading' ? <p role="status" className="border-t border-line pt-3 text-center text-sm text-ink/50">Checking sign-in…</p> : <Link href="/login" className="border-t border-line pt-3 text-center text-sm font-semibold text-moss">Log in to comment</Link>}
     {reportingId && <ReportDialog targetType="COMMENT" targetId={reportingId} onClose={() => setReportingId('')} />}
   </section>;
 }
