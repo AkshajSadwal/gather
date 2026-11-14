@@ -84,6 +84,12 @@ New browser media URLs go through `GET /api/media?key=...`; the backend authenti
 
 Admin access is configured by normalized usernames in `ADMIN_USERNAMES`. The admin report queue records review status, reviewer, and review time; post deletion shares the same media cleanup helper as owner deletion. Hashtag pages and popular Explore queries filter private, blocked, and muted authors before returning posts.
 
+## Admin bulk imports
+
+The admin-only bulk importer accepts one ZIP job at a time and checks `requireAuth` plus the existing `requireAdmin` middleware on every account, upload, history, detail, and retry request. Multipart uploads use account/IP rate limits and a same-origin check. The Python standard-library helper validates ZIP paths, symlinks, encrypted entries, entry counts, declared expansion size and compression ratios, then extracts one media file at a time into a private temporary directory. The backend verifies each extracted JPG/MP4 signature before upload.
+
+Import jobs and pending ZIPs live under `uploads/.bulk-imports`, using atomic JSON replacement and private file permissions. Startup resumes queued and interrupted jobs; successful database writes are rechecked by deterministic SHA-256 object keys on retry. Images create one Post; videos create linked Post, PostMedia, Reel and ReelMedia rows in a transaction. Media continues to use the existing `s3://<bucket>/bulk-imports/<user-id>/...` references and `objectKey` field so private signed-media authorization remains unchanged. The initiating admin ID is stored on each job. This filesystem persistence intentionally preserves the temporary VM importer's job format and needs no Prisma migration; preserve this directory during VM source reconciliation and backups.
+
 Admin report decisions and content removals write `ModerationAction` rows inside the same database transaction as the report update/content deletion. Each row stores report and moderator snapshots; nullable foreign keys use `SET NULL` so deleting a report or moderator does not erase the history. The admin-only history API reads these rows with cursor pagination and no per-row lookups.
 
 Sessions are checked against a 30-second in-process user-existence cache shared by HTTP and Socket.IO authentication. Password changes record `passwordChangedAt`; sessions without a newer `authAt` are rejected, and account deletion/password changes invalidate the local cache entry immediately.

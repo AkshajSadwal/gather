@@ -6,13 +6,14 @@ const { ensureBucket } = require('./services/minio');
 const { cleanupTempUploads } = require('./services/storage');
 const { startCleanup, stopCleanup } = require('./services/cleanup');
 const { startFeatureRecompute, stopFeatureRecompute } = require('./services/recoFeatures');
+const bulkImport = require('./services/bulkImportService');
 const { createSocketServer } = require('./sockets');
 
 const server = http.createServer(app);
 const io = createSocketServer(server, frontendUrl);
 let cleanupTimer = null;
 let recoFeaturesTimer = null;
-Promise.all([io.callService.ready, ensureBucket(), cleanupTempUploads()]).then(() => { cleanupTimer = startCleanup(); recoFeaturesTimer = startFeatureRecompute(); server.listen(port, () => console.log(`Gather backend listening on http://localhost:${port}`)); }).catch((error) => {
+Promise.all([io.callService.ready, ensureBucket(), cleanupTempUploads()]).then(async () => { await bulkImport.start().catch(() => console.error('[bulk-import] Startup recovery could not be initialized.')); cleanupTimer = startCleanup(); recoFeaturesTimer = startFeatureRecompute(); server.listen(port, () => console.log(`Gather backend listening on http://localhost:${port}`)); }).catch((error) => {
   console.error('[startup] mediasoup or MinIO initialization failed; backend will not accept traffic.', error);
   process.exitCode = 1;
   io.callService.close().finally(() => prisma.$disconnect());

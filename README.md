@@ -84,7 +84,7 @@ npm run test:e2e
 
 The backend periodically removes stories expired for more than an hour, stale temporary uploads, and read notifications older than 90 days. `CLEANUP_INTERVAL_MS` controls the interval in milliseconds and defaults to `1800000` (30 minutes); cleanup is disabled in the test environment.
 
-Set `ADMIN_USERNAMES` to a comma-separated list of lowercase or mixed-case usernames to grant access to the report review page; the default empty value grants no admin access. The `20261113000000_password_changed_and_report_review` migration adds password-session revocation and report review metadata.
+Set `ADMIN_USERNAMES` to a comma-separated list of Gather usernames to grant access to the report review and bulk media import pages; the default empty value grants no admin access. The bulk importer uses the existing private S3-compatible storage settings and Python 3 standard library. It accepts ZIP archives up to 1 GB with up to 500 JPG/JPEG or MP4 files (5 GB expanded total); images are limited to 100 MB and videos to 500 MB. Job JSON and pending archives persist under `uploads/.bulk-imports` and are resumed after backend restarts. Keep this directory on persistent storage and include it in restricted backups. The `20261113000000_password_changed_and_report_review` migration adds password-session revocation and report review metadata; bulk imports do not require a database migration.
 
 ## Documentation
 

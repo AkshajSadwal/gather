@@ -29,6 +29,7 @@ minio.license
 !ARCHITECTURE.md
 !STORAGE.md
 !docs/deployment/production-reconciliation.md
+!docs/API.md
 node_modules/
 
 frontend.zip
