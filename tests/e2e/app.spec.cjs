@@ -10,7 +10,6 @@ const prisma = new PrismaClient();
 const fixtureImage = path.join(__dirname, '.e2e-image-fixture.png');
 const runId = Date.now().toString(36);
 const newUsername = `e2e${runId}`;
-const newEmail = `e2e-${runId}@example.test`;
 const demoPassword = 'GatherDemo2026!';
 const createdPostCaption = `Browser journey ${runId} #gathertest`;
 const createdComment = `Realtime-ready comment ${runId}`;
@@ -34,7 +33,7 @@ test.afterAll(async () => {
 
 async function signIn(page, identifier = 'maya') {
   await page.goto('/login');
-  await page.getByLabel('Username or email').fill(identifier);
+  await page.getByLabel('Username', { exact: true }).fill(identifier);
   await page.getByLabel('Password').fill(demoPassword);
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page).toHaveURL(/\/$/);
@@ -51,9 +50,9 @@ test('signup, availability, login persistence, protected settings, and logout', 
   await page.goto('/signup');
   await page.getByLabel('Display name').fill('Gather E2E');
   await page.getByLabel('Username', { exact: true }).fill(newUsername);
-  await page.getByLabel('Email', { exact: true }).fill(newEmail);
   await page.getByLabel('Password', { exact: true }).fill('BrowserJourney2026!');
-  await expect(page.getByText('Available')).toHaveCount(2);
+  await page.getByLabel('Confirm password').fill('BrowserJourney2026!');
+  await expect(page.getByText('Available')).toHaveCount(1);
   await page.getByRole('button', { name: 'Create account' }).click();
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByRole('link', { name: 'Profile' })).toBeVisible();
@@ -64,13 +63,13 @@ test('signup, availability, login persistence, protected settings, and logout', 
   await expect(page.getByRole('heading', { name: /settings/i })).toBeVisible();
 
   const duplicateUsername = await page.request.post('http://localhost:4000/api/auth/signup', {
-    data: { username: newUsername, email: `different-${runId}@example.test`, password: 'BrowserJourney2026!' }
+    data: { username: newUsername, password: 'BrowserJourney2026!' }
   });
   expect(duplicateUsername.status()).toBe(409);
-  const duplicateEmail = await page.request.post('http://localhost:4000/api/auth/signup', {
-    data: { username: `other${runId}`, email: newEmail, password: 'BrowserJourney2026!' }
+  const rejectedEmail = await page.request.post('http://localhost:4000/api/auth/signup', {
+    data: { username: `other${runId}`, email: `e2e-${runId}@example.test`, password: 'BrowserJourney2026!' }
   });
-  expect(duplicateEmail.status()).toBe(409);
+  expect(rejectedEmail.status()).toBe(400);
 
   await page.getByRole('button', { name: 'Sign out' }).click();
   await expect(page).toHaveURL(/\/login/);

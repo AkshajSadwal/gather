@@ -58,7 +58,6 @@ router.post('/auth/login', maybeAuth, authLimiter, route(auth.login));
 router.post('/auth/change-password', requireAuth, authLimiter, route(account.changePassword));
 router.post('/auth/google-sync', requireInternal, route(auth.syncGoogle));
 router.get('/users/check-username', maybeAuth, availabilityLimiter, route(auth.checkUsername));
-router.get('/users/check-email', maybeAuth, availabilityLimiter, route(auth.checkEmail));
 router.get('/users/suggestions', maybeAuth, route(messages.suggestions));
 router.get('/users/:username', maybeAuth, route(users.profile));
 router.patch('/users/me/profile', requireAuth, writeLimiter, route(users.updateProfile));
@@ -126,6 +125,7 @@ router.post('/messages/:messageId/reactions', requireAuth, writeLimiter, route(m
 router.delete('/stories/:id', requireAuth, writeLimiter, route(stories.remove));
 router.get('/stories/:id/viewers', requireAuth, route(stories.viewers));
 router.get('/reels', maybeAuth, route(reels.list));
+router.post('/reels/discover', readLimiter, route(reels.guestFeed));
 router.get('/reels/feed', requireAuth, readLimiter, route(reels.feed));
 router.post('/reels/feed', requireAuth, readLimiter, route(reels.feed));
 router.post('/reels', requireAuth, uploadIpLimiter, uploadAccountLimiter, writeLimiter, upload.single('media'), route(reels.create));

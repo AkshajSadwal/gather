@@ -9,6 +9,17 @@ import Avatar from './Avatar';
 import ReportDialog from './ReportDialog';
 import { useToast } from './Providers';
 
+function commentTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const minutes = Math.max(0, Math.floor((Date.now() - date.getTime()) / 60000));
+  if (minutes < 1) return 'now';
+  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 1440) return `${Math.floor(minutes / 60)}h`;
+  if (minutes < 10080) return `${Math.floor(minutes / 1440)}d`;
+  return date.toLocaleDateString();
+}
+
 export default function CommentsPanel({ postId, postAuthorId, onCommentAdded, recoImpressionId, className = '' }) {
   const { data: session, status } = useSession();
   const [comments, setComments] = useState([]);
@@ -125,9 +136,9 @@ export default function CommentsPanel({ postId, postAuthorId, onCommentAdded, re
     return <div key={item.id} className="flex gap-3">
       <Avatar src={item.user.image} name={item.user.username} size="xs" />
       <div className="min-w-0 flex-1">
-        <div className="break-words text-sm">{item.pinnedAt && <span className="mr-1 inline-flex items-center gap-1 text-[10px] font-semibold text-moss"><Pin size={11} />Pinned</span>}<Link href={`/profile/${item.user.username}`} className="mr-2 font-semibold hover:underline">@{item.user.username}</Link>{item.body}</div>
+        <div className="whitespace-pre-wrap break-words text-sm leading-6 [overflow-wrap:anywhere]">{item.pinnedAt && <span className="mr-1 inline-flex items-center gap-1 text-[10px] font-semibold text-moss"><Pin size={11} />Pinned</span>}<Link href={`/profile/${item.user.username}`} className="mr-2 font-semibold hover:underline">@{item.user.username}</Link>{item.body}</div>
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink/45">
-          <span>{new Date(item.createdAt).toLocaleDateString()}</span>
+          <time dateTime={item.createdAt} title={new Date(item.createdAt).toLocaleString()}>{commentTime(item.createdAt)}</time>
           {status === 'authenticated' && <button type="button" onClick={() => void toggleLike(item, parentId)} aria-label={item.likedByMe ? 'Unlike comment' : 'Like comment'} className={`inline-flex items-center gap-1 ${item.likedByMe ? 'text-coral' : 'hover:text-coral'}`}><Heart size={12} fill={item.likedByMe ? 'currentColor' : 'none'} />{item.likeCount || 0}</button>}
           {!parentId && status === 'authenticated' && <button type="button" onClick={() => setReplyTarget(item)} className="inline-flex items-center gap-1 hover:text-moss"><Reply size={12} />Reply</button>}
           {!parentId && Number(item._count?.replies || 0) > 0 && <button type="button" onClick={() => replyState.expanded ? setReplies((all) => ({ ...all, [item.id]: { ...all[item.id], expanded: false } })) : void loadReplies(item.id)} className="inline-flex items-center gap-1 hover:text-moss"><MessageCircle size={12} />{replyState.expanded ? 'Hide' : `View ${item._count.replies}`} replies</button>}
@@ -145,13 +156,13 @@ export default function CommentsPanel({ postId, postAuthorId, onCommentAdded, re
 
   return <section data-reel-comments="true" aria-label="Comments" className={`comments-panel grid min-h-0 gap-4 ${className}`}>
     <div tabIndex={0} aria-label="Comments list" className="comments-list max-h-[55vh] min-h-20 space-y-4 overflow-y-auto overscroll-contain pr-1">
-      {loading ? <p className="py-8 text-center text-sm text-ink/50">Loading comments…</p> : error ? <div role="alert" className="py-6 text-center text-sm text-coral">{error} <button type="button" onClick={() => void loadComments()} className="underline">Retry</button></div> : comments.length ? comments.map((item) => renderComment(item)) : <p className="py-8 text-center text-sm text-ink/50">No comments yet.</p>}
+      {loading ? <div role="status" aria-label="Loading comments" className="space-y-5 py-3">{[0, 1, 2].map((item) => <div key={item} className="flex gap-3"><span className="skeleton h-8 w-8 shrink-0 rounded-full" /><span className="flex-1 space-y-2"><span className="skeleton block h-3 w-1/3 rounded" /><span className="skeleton block h-3 w-4/5 rounded" /></span></div>)}</div> : error ? <div role="alert" className="py-6 text-center text-sm text-coral">{error} <button type="button" onClick={() => void loadComments()} className="underline">Retry</button></div> : comments.length ? comments.map((item) => renderComment(item)) : <p className="py-8 text-center text-sm text-ink/50">No comments yet.</p>}
     </div>
     {!loading && nextCursor && <button type="button" disabled={loadingMore} onClick={() => void loadComments(nextCursor)} className="mx-auto text-xs font-semibold text-moss disabled:opacity-50">{loadingMore ? 'Loading…' : 'Load more comments'}</button>}
     {paginationError && <p role="alert" className="text-xs text-coral">{paginationError} <button type="button" disabled={loadingMore} onClick={() => void loadComments(nextCursor)} className="font-semibold underline">Retry loading comments</button></p>}
     {status === 'authenticated' ? <form onSubmit={submit} className="grid gap-2 border-t border-line pt-3">
       {replyTarget && <p className="flex items-center justify-between text-xs text-ink/55">Replying to @{replyTarget.user.username}<button type="button" onClick={() => setReplyTarget(null)} className="font-semibold text-moss">Cancel</button></p>}
-      <div className="flex gap-2"><input value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={1000} placeholder={replyTarget ? 'Write a reply…' : 'Add a comment…'} className="min-w-0 flex-1 border-b border-line py-2 text-sm outline-none focus:border-moss" /><button type="submit" disabled={!draft.trim() || busy} className="inline-flex items-center gap-1 text-sm font-semibold text-moss disabled:opacity-40">{busy && <LoaderCircle size={14} className="animate-spin" />}Post</button></div>
+      <div className="flex items-center gap-2"><input aria-label={replyTarget ? 'Write a reply' : 'Add a comment'} value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={1000} placeholder={replyTarget ? 'Write a reply…' : 'Add a comment…'} className="min-w-0 flex-1 rounded-full border border-line px-4 py-2.5 text-sm focus:border-moss" /><button type="submit" disabled={!draft.trim() || busy} className="inline-flex min-h-10 items-center gap-1 rounded-full px-3 text-sm font-semibold text-moss disabled:opacity-40">{busy && <LoaderCircle size={14} className="animate-spin" />}{busy ? 'Posting…' : 'Post'}</button></div>
     </form> : status === 'loading' ? <p role="status" className="border-t border-line pt-3 text-center text-sm text-ink/50">Checking sign-in…</p> : <Link href="/login" className="border-t border-line pt-3 text-center text-sm font-semibold text-moss">Log in to comment</Link>}
     {reportingId && <ReportDialog targetType="COMMENT" targetId={reportingId} onClose={() => setReportingId('')} />}
   </section>;

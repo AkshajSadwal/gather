@@ -18,8 +18,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     ...(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET ? [Google({ clientId: process.env.GOOGLE_CLIENT_ID, clientSecret: process.env.GOOGLE_CLIENT_SECRET })] : []),
     Credentials({
       id: 'credentials',
-      name: 'Username or email',
-      credentials: { identifier: { label: 'Username or email', type: 'text' }, password: { label: 'Password', type: 'password' } },
+      name: 'Username',
+      credentials: { identifier: { label: 'Username', type: 'text' }, password: { label: 'Password', type: 'password' } },
       async authorize(credentials) {
         const response = await fetch(`${backend}/api/auth/login`, {
           method: 'POST', headers: { 'content-type': 'application/json' },
@@ -36,20 +36,22 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async jwt({ token, user, account }) {
       if (user && account?.provider === 'credentials') { token.sub = user.id; token.username = user.username; token.authAt = Math.floor(Date.now() / 1000); }
       if (user && account?.provider === 'google') {
+        if (!account.providerAccountId) throw new Error('Google account identity is unavailable.');
         const response = await fetch(`${backend}/api/auth/google-sync`, {
           method: 'POST', headers: { 'content-type': 'application/json', 'x-internal-auth': process.env.INTERNAL_AUTH_SECRET || '' },
-          body: JSON.stringify({ email: user.email, name: user.name, image: user.image }), cache: 'no-store'
+          body: JSON.stringify({ providerAccountId: account.providerAccountId, email: user.email, name: user.name, image: user.image }), cache: 'no-store'
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || !payload.data?.user?.id) throw new Error('Google account could not be connected to the app account.');
         token.sub = payload.data.user.id;
         token.username = payload.data.user.username;
         token.authAt = Math.floor(Date.now() / 1000);
+        delete token.email;
       }
       return token;
     },
     async session({ session, token }) {
-      if (session.user) { session.user.id = token.sub; session.user.username = token.username; session.user.authAt = token.authAt; }
+      if (session.user) { session.user.id = token.sub; session.user.username = token.username; session.user.authAt = token.authAt; delete session.user.email; }
       return session;
     }
   },

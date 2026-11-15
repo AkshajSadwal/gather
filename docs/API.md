@@ -9,13 +9,12 @@ JSON success responses use `{ "data": ... }`; failures use `{ "error": { "code":
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/health` | API + PostgreSQL health |
-| POST | `/api/auth/signup` | Register a credential account |
-| POST | `/api/auth/login` | Validate credentials for Auth.js |
+| POST | `/api/auth/signup` | Register with `{ username, password, displayName? }`. Email is not accepted |
+| POST | `/api/auth/login` | Validate `{ identifier: username, password }` for Auth.js |
 | POST | `/api/auth/change-password` | Change credential password (`{ currentPassword, newPassword }`); returns `reauthRequired: true`; Google-only accounts receive `PASSWORD_NOT_CONFIGURED` |
 | GET | `/api/auth/me` | Current account, accepted social counts, and `isAdmin` |
-| POST | `/api/auth/google-sync` | Internal Google account upsert |
+| POST | `/api/auth/google-sync` | Internal Auth.js Google subject mapping. Requires `x-internal-auth`; body includes verified `providerAccountId`, optional `name`, `image`, and transient `email` solely for detecting legacy accounts. A legacy Google-only email match returns `409 LEGACY_GOOGLE_LINK_REQUIRED`; no account is relinked by email |
 | GET | `/api/users/check-username?username=` | Rate-limited username availability |
-| GET | `/api/users/check-email?email=` | Rate-limited email availability |
 | GET/PATCH | `/api/users/:username` / `/api/users/me/profile` | Read profile / update only current user |
 | DELETE | `/api/users/me` | Permanently delete the current account and its media |
 | POST | `/api/users/me/avatar` | Upload only current user's avatar |
@@ -61,6 +60,7 @@ JSON success responses use `{ "data": ... }`; failures use `{ "error": { "code":
 | POST/DELETE | `/api/stories/:id/view` / `/api/stories/:id` | Record view / delete own story |
 | GET | `/api/stories/:id/viewers` | Story owner viewer list |
 | GET/POST | `/api/reels` | Visible reels / create reel |
+| POST | `/api/reels/discover?size=&sessionId=` | Public, rate-limited creator-balanced discovery. Body `{ excludeReelIds: [...] }` (up to 5,000). Returns `{ items }` without impressions or personalization. Only public, unarchived Reels with media are eligible |
 
 ## Report rules
 

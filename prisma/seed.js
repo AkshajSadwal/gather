@@ -7,11 +7,11 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const demoPassword = 'GatherDemo2026!';
 const people = [
-  { username: 'maya', email: 'maya@example.test', name: 'Maya Chen', bio: 'Collecting quiet mornings, good light, and new recipes.', image: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=240&h=240&fit=crop&crop=faces' },
-  { username: 'noah', email: 'noah@example.test', name: 'Noah Williams', bio: 'Outdoors when I can be. Private account for this demo.', image: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=240&h=240&fit=crop&crop=faces', visibility: 'PRIVATE' },
-  { username: 'amara', email: 'amara@example.test', name: 'Amara Okafor', bio: 'Color, design, and tiny corners of the world.', image: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=240&h=240&fit=crop&crop=faces' },
-  { username: 'leo', email: 'leo@example.test', name: 'Leo Park', bio: 'Weekend hikes and a camera that is always running.', image: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=240&h=240&fit=crop&crop=faces' },
-  { username: 'sofia', email: 'sofia@example.test', name: 'Sofia Rivera', bio: 'Making things slowly, sharing them happily.', image: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=240&h=240&fit=crop&crop=faces' }
+  { username: 'maya', name: 'Maya Chen', bio: 'Collecting quiet mornings, good light, and new recipes.', image: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=240&h=240&fit=crop&crop=faces' },
+  { username: 'noah', name: 'Noah Williams', bio: 'Outdoors when I can be. Private account for this demo.', image: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=240&h=240&fit=crop&crop=faces', visibility: 'PRIVATE' },
+  { username: 'amara', name: 'Amara Okafor', bio: 'Color, design, and tiny corners of the world.', image: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=240&h=240&fit=crop&crop=faces' },
+  { username: 'leo', name: 'Leo Park', bio: 'Weekend hikes and a camera that is always running.', image: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=240&h=240&fit=crop&crop=faces' },
+  { username: 'sofia', name: 'Sofia Rivera', bio: 'Making things slowly, sharing them happily.', image: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=240&h=240&fit=crop&crop=faces' }
 ];
 const photoUrls = [
   'https://images.unsplash.com/photo-1470252649378-9c29740c9fa8?w=1200&auto=format&fit=crop',
@@ -28,8 +28,8 @@ async function main() {
   for (const person of people) {
     const user = await prisma.user.upsert({
       where: { username: person.username },
-      create: { username: person.username, email: person.email, passwordHash, image: person.image, profile: { create: { displayName: person.name, bio: person.bio, avatarUrl: person.image, visibility: person.visibility || 'PUBLIC' } } },
-      update: { email: person.email, passwordHash, image: person.image, profile: { upsert: { create: { displayName: person.name, bio: person.bio, avatarUrl: person.image, visibility: person.visibility || 'PUBLIC' }, update: { displayName: person.name, bio: person.bio, avatarUrl: person.image, visibility: person.visibility || 'PUBLIC' } } } }
+      create: { username: person.username, passwordHash, image: person.image, profile: { create: { displayName: person.name, bio: person.bio, avatarUrl: person.image, visibility: person.visibility || 'PUBLIC' } } },
+      update: { passwordHash, image: person.image, profile: { upsert: { create: { displayName: person.name, bio: person.bio, avatarUrl: person.image, visibility: person.visibility || 'PUBLIC' }, update: { displayName: person.name, bio: person.bio, avatarUrl: person.image, visibility: person.visibility || 'PUBLIC' } } } }
     });
     users.push(user);
   }

@@ -37,11 +37,13 @@ The seed creates fictional demo accounts `maya`, `noah`, `amara`, `leo`, and `so
 - PostgreSQL stores users, profiles, follows/follow requests, blocks and mutes, posts/media metadata, likes, comments/replies, bookmarks, hashtags, reports, notifications, conversations/messages/read receipts and soft-delete markers, stories/views, reels, and call metadata.
 - PostgreSQL stores media metadata and an `s3://bucket/object-key` reference. Actual image/video bytes live in S3-compatible object storage. Local development uses MinIO in Docker; production can use S3, Cloudflare R2, or another S3-compatible service plus a CDN.
 - Prisma is the ORM/typed query layer between the JavaScript backend and PostgreSQL.
-- Username and email are normalized before writes and protected by database-level unique constraints for race-safe uniqueness.
+- Usernames are normalized and uniquely constrained. New credential accounts do not store an email address. Historical email values remain during the staged Google-account transition.
 
 ## Authentication
 
-Auth.js owns the browser session. Credentials login is checked by Express with bcrypt; Google sign-in uses a server-only account-sync request protected by `INTERNAL_AUTH_SECRET`. Express and Socket.IO validate the exact Auth.js cookie using the server-only `AUTH_SECRET`. No bearer token or signing key is exposed to browser JavaScript.
+Auth.js owns the browser session. New credential accounts use a username and password; there is no email-based password recovery. Existing credential accounts retain their usernames, passwords, IDs, and content. Google sign-in maps Auth.js's verified provider account ID to a Gather user through a server-only account-sync request protected by `INTERNAL_AUTH_SECRET`. A matching email never automatically links accounts. Express and Socket.IO validate the exact Auth.js cookie using the server-only `AUTH_SECRET`. No bearer token or signing key is exposed to browser JavaScript.
+
+Google sign-in requires `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `NEXT_PUBLIC_GOOGLE_LOGIN=true`, along with the existing `AUTH_SECRET`, `INTERNAL_AUTH_SECRET`, `AUTH_URL`/`NEXTAUTH_URL`, and backend origin settings. Register `http://localhost:3000/api/auth/callback/google` for local development. See the [auth transition guide](docs/deployment/auth-transition.md) before considering a production rollout: legacy Google-only accounts require a reviewed link to preserve their IDs and content.
 
 Generate independent secrets with:
 
@@ -96,6 +98,7 @@ Set `ADMIN_USERNAMES` to a comma-separated list of Gather usernames to grant acc
 - [Security notes](SECURITY.md)
 - [Media storage](STORAGE.md)
 - [Production reconciliation guide](docs/deployment/production-reconciliation.md)
+- [Authentication transition and Google OAuth](docs/deployment/auth-transition.md)
 
 ## Deployment notes
 

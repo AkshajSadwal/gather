@@ -52,9 +52,9 @@ test('auth, social persistence, upload validation, messages, and call lifecycle'
   catch (error) { await prisma.$disconnect(); t.skip(`PostgreSQL is unavailable: ${error.message.split('\n')[0]}`); return; }
   const suffix = crypto.randomBytes(5).toString('hex');
   const accounts = [
-    { username: `test_${suffix}`, email: `first_${suffix}@example.test`, password: 'Secure-pass-123', displayName: 'First Tester' },
-    { username: `second_${suffix}`, email: `second_${suffix}@example.test`, password: 'Secure-pass-123' },
-    { username: `outsider_${suffix}`, email: `outside_${suffix}@example.test`, password: 'Secure-pass-123' }
+    { username: `test_${suffix}`, password: 'Secure-pass-123', displayName: 'First Tester' },
+    { username: `second_${suffix}`, password: 'Secure-pass-123' },
+    { username: `outsider_${suffix}`, password: 'Secure-pass-123' }
   ];
   const createdUsers = [];
   const createdConversationIds = [];
@@ -69,6 +69,7 @@ test('auth, social persistence, upload validation, messages, and call lifecycle'
     const firstUser = firstSignup.body.data.user;
     assert.equal(firstUser.username, accounts[0].username);
     assert.equal('passwordHash' in firstUser, false);
+    assert.equal('email' in firstUser, false);
     createdUsers.push(firstUser.id);
     const secondUser = (await request(app).post('/api/auth/signup').send(accounts[1]).expect(201)).body.data.user;
     createdUsers.push(secondUser.id);
@@ -89,15 +90,16 @@ test('auth, social persistence, upload validation, messages, and call lifecycle'
     await request(app).get('/api/auth/me').set('Cookie', 'authjs.session-token=invalid').expect(401);
 
     assert.equal((await request(app).get(`/api/users/check-username?username=${accounts[0].username.toUpperCase()}`).expect(200)).body.data.available, false);
-    assert.equal((await request(app).get(`/api/users/check-email?email=${accounts[0].email.toUpperCase()}`).expect(200)).body.data.available, false);
     assert.equal((await request(app).get(`/api/users/check-username?username=fresh_${suffix}`).expect(200)).body.data.available, true);
-    assert.equal((await request(app).get(`/api/users/check-email?email=fresh_${suffix}%40example.test`).expect(200)).body.data.available, true);
-    await request(app).post('/api/auth/signup').send({ ...accounts[1], username: accounts[0].username.toUpperCase(), email: `different_${suffix}@example.test` }).expect(409);
-    await request(app).post('/api/auth/signup').send({ ...accounts[1], username: `new_${suffix}`, email: accounts[0].email.toUpperCase() }).expect(409);
+    await request(app).get(`/api/users/check-email?email=unused_${suffix}%40example.test`).expect(404);
+    await request(app).post('/api/auth/signup').send({ ...accounts[1], username: accounts[0].username.toUpperCase() }).expect(409);
+    await request(app).post('/api/auth/signup').send({ ...accounts[1], username: `new_${suffix}`, email: `unused_${suffix}@example.test` }).expect(400);
     await request(app).post('/api/auth/login').send({ identifier: accounts[0].username, password: 'wrong-password' }).expect(401);
-    const login = await request(app).post('/api/auth/login').send({ identifier: accounts[0].email.toUpperCase(), password: accounts[0].password }).expect(200);
+    await request(app).post('/api/auth/login').send({ identifier: `unused_${suffix}@example.test`, password: accounts[0].password }).expect(401);
+    const login = await request(app).post('/api/auth/login').send({ identifier: accounts[0].username.toUpperCase(), password: accounts[0].password }).expect(200);
     assert.equal(login.body.data.user.id, firstUser.id);
     assert.equal('passwordHash' in login.body.data.user, false);
+    assert.equal('email' in login.body.data.user, false);
 
     const ownPostResponse = await request(app).post('/api/posts').set('Cookie', firstCookie).field('caption', 'A test moment #integration').attach('media', image, { filename: 'tiny.png', contentType: 'image/png' }).expect(201);
     const ownPost = ownPostResponse.body.data.post;

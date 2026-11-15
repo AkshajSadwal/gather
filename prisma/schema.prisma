@@ -105,7 +105,7 @@ enum ModerationActionType {
 model User {
   id                  String   @id @default(cuid())
   username            String   @unique @db.VarChar(30)
-  email               String   @unique @db.VarChar(254)
+  email               String?  @unique @db.VarChar(254)
   passwordHash        String?
   passwordChangedAt   DateTime?
   emailVerified       DateTime?
@@ -113,6 +113,7 @@ model User {
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
   profile             Profile?
+  oauthIdentities     OAuthIdentity[]
   followers           Follow[] @relation("followed")
   following           Follow[] @relation("follower")
   posts               Post[]
@@ -149,6 +150,18 @@ model User {
   creatorAffinities UserCreatorAffinity[] @relation("affinityCreator")
   recoFeatures UserRecoFeatures?
   recommendationRequests RecommendationRequest[]
+}
+
+model OAuthIdentity {
+  id                String   @id @default(cuid())
+  userId            String
+  provider          String   @db.VarChar(32)
+  providerAccountId String   @db.VarChar(255)
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  @@unique([provider, providerAccountId])
+  @@index([userId])
 }
 
 

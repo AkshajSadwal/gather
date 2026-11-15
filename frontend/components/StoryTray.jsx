@@ -19,6 +19,8 @@ export default function StoryTray() {
   const [viewer, setViewer] = useState(null);
   const [storyMuted, setStoryMuted] = useState(false);
   const [storyHasAudio, setStoryHasAudio] = useState(true);
+  const [storyProgress, setStoryProgress] = useState(0);
+  const [storyMediaError, setStoryMediaError] = useState(false);
   const [storyViewers, setStoryViewers] = useState(null);
   const [viewersOpen, setViewersOpen] = useState(false);
   const [viewersBusy, setViewersBusy] = useState(false);
@@ -33,6 +35,7 @@ export default function StoryTray() {
   const [replyBusy, setReplyBusy] = useState(false);
   const fileRef = useRef(null);
   const storyVideoRef = useRef(null);
+  const viewerRef = useRef(null);
   const storyMutedPreference = useRef(false);
   const notify = useToast();
   const loadStories = useCallback(async () => {
@@ -110,6 +113,14 @@ export default function StoryTray() {
     storyVideoRef.current?.pause();
     setViewer(null);
   };
+  useEffect(() => {
+    if (!viewer) return undefined;
+    const previous = document.activeElement;
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    viewerRef.current?.focus();
+    return () => { document.body.style.overflow = overflow; previous?.focus?.(); };
+  }, [Boolean(viewer)]);
   const openComposer = () => { setUploadError(''); setComposerOpen(true); };
   const closeComposer = () => {
     if (busy) return;
@@ -135,8 +146,10 @@ export default function StoryTray() {
     setViewersOpen(false);
     setStoryViewers(null);
     setReplyDraft('');
+    setStoryProgress(0);
+    setStoryMediaError(false);
     if (current.story.authorId !== session?.user?.id) api(`/stories/${current.story.id}/view`, { method: 'POST' }).catch(() => {});
-    if (current.story.media[0]?.type !== 'VIDEO') { const timer = setTimeout(advance, 7000); return () => clearTimeout(timer); }
+    if (current.story.media?.[0]?.type !== 'VIDEO') { const timer = setTimeout(advance, 7000); return () => clearTimeout(timer); }
   }, [viewer?.groupIndex, viewer?.storyIndex, current?.story.id, session?.user?.id]);
 
   const deleteStory = async () => {
@@ -165,7 +178,7 @@ export default function StoryTray() {
     <div className="hide-scrollbar flex min-h-[98px] items-center gap-3 overflow-x-auto px-1 py-2" aria-label="Stories">
       <div className="relative flex w-[72px] shrink-0 justify-center">
         <button type="button" onClick={() => ownGroup && ownGroup.stories.length ? setViewer({ groupIndex: groups.indexOf(ownGroup), storyIndex: 0 }) : openComposer()} className="flex flex-col items-center gap-2 text-center" aria-label={ownGroup ? 'View your story' : 'Create your story'}>
-          <Avatar ring={ownGroup?.stories.some((story) => story.audience === 'CLOSE_FRIENDS') ? 'close' : Boolean(ownGroup)} src={session?.user?.image || ownGroup?.user?.profile?.avatarUrl} name={ownGroup?.user?.username || session?.user?.name || session?.user?.email} size="md" />
+          <Avatar ring={ownGroup?.stories.some((story) => story.audience === 'CLOSE_FRIENDS') ? 'close' : Boolean(ownGroup)} src={session?.user?.image || ownGroup?.user?.profile?.avatarUrl} name={ownGroup?.user?.username || session?.user?.name || session?.user?.username} size="md" />
           <span className="max-w-[70px] truncate text-[11px] text-ink/70">Your story</span>
         </button>
         <button type="button" onClick={openComposer} disabled={busy} aria-label="Add to your story" className="absolute left-[43px] top-[36px] grid h-6 w-6 place-items-center rounded-full border-2 border-white bg-moss text-white disabled:opacity-50"><Plus size={13} /></button>
@@ -191,11 +204,11 @@ export default function StoryTray() {
         <footer className="mt-5 flex justify-end gap-2"><button type="button" onClick={closeComposer} disabled={busy} className="rounded-xl border border-line px-4 py-2 text-sm font-semibold disabled:opacity-40">Cancel</button><button type="button" onClick={() => void publishStory()} disabled={!draftFile || busy} className="rounded-xl bg-moss px-4 py-2 text-sm font-semibold text-white disabled:opacity-45">{busy ? 'Publishing…' : 'Publish story'}</button></footer>
       </section>
     </div>, document.body)}
-    {current && typeof document !== 'undefined' && createPortal(<div role="dialog" aria-modal="true" aria-label={`Story by ${current.group.user.username}`} className="fixed inset-0 z-[60] grid place-items-center bg-[rgba(10,12,20,.4)] p-2 backdrop-blur-md sm:p-5" onKeyDown={(event) => { if (event.key === 'Escape') closeViewer(); if (event.key === 'ArrowRight') advance(); if (event.key === 'ArrowLeft') retreat(); }} tabIndex={-1}>
+    {current && typeof document !== 'undefined' && createPortal(<div ref={viewerRef} role="dialog" aria-modal="true" aria-label={`Story by ${current.group.user.username}`} className="fixed inset-0 z-[60] grid place-items-center bg-[rgba(10,12,20,.4)] p-2 backdrop-blur-md sm:p-5" onKeyDown={(event) => { if (event.key === 'Escape') closeViewer(); if (event.key === 'ArrowRight') advance(); if (event.key === 'ArrowLeft') retreat(); }} tabIndex={-1}>
       <div className="story-viewer-card relative aspect-[9/16] h-[min(92dvh,820px)] w-auto max-w-[92vw] overflow-hidden rounded-[28px] bg-ink shadow-float">
-        <div className="absolute left-3 right-3 top-3 z-10 flex gap-1">{current.group.stories.map((story, i) => <span key={story.id} className="h-1 flex-1 overflow-hidden rounded bg-surface/35"><span key={`${current.story.id}-${i}`} className={`block h-full origin-left bg-surface ${i < current.storyIndex ? 'w-full' : i === current.storyIndex && story.media?.[0]?.type !== 'VIDEO' ? 'animate-[story-progress_7s_linear_forwards]' : i === current.storyIndex ? 'w-full' : 'w-0'}`} /></span>)}</div>
-        <div className="absolute left-3 right-3 top-7 z-10 flex items-center gap-3 text-white"><Avatar ring={current.story.audience === 'CLOSE_FRIENDS' ? 'close' : false} src={current.group.user.image} name={current.group.user.username} size="xs" /><Link href={`/profile/${current.group.user.username}`} className="flex-1 text-sm font-medium">{current.group.user.username}</Link>{currentStoryMedia?.type === 'VIDEO' && storyHasAudio && <button type="button" aria-label={storyMuted ? 'Unmute story sound' : 'Mute story sound'} title={storyMuted ? 'Unmute sound' : 'Mute sound'} onClick={toggleStorySound} className="glass-pill grid h-9 w-9 place-items-center text-white">{storyMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}</button>}<button type="button" aria-label="Close story" onClick={closeViewer} className="glass-pill grid h-9 w-9 place-items-center text-white"><X /></button></div>
-        {currentMediaSource ? currentStoryMedia?.type === 'VIDEO' ? <video key={current.story.id} ref={(element) => { storyVideoRef.current = element; }} src={currentMediaSource} playsInline onCanPlay={(event) => { void startStoryPlayback(event.currentTarget); }} onLoadedMetadata={(event) => { const hasAudio = detectVideoAudio(event.currentTarget); setStoryHasAudio(hasAudio ?? true); setStoryMuted(event.currentTarget.muted); }} onVolumeChange={(event) => setStoryMuted(event.currentTarget.muted)} onEnded={advance} className="h-full w-full object-contain" /> : <img src={currentMediaSource} alt={current.story.caption || 'Story'} className="h-full w-full object-contain" /> : <div role="status" className="absolute inset-0 grid place-items-center p-8 text-center text-sm text-white/70">Story media is unavailable.</div>}
+        <div className="absolute left-3 right-3 top-3 z-10 flex gap-1">{current.group.stories.map((story, i) => <span key={story.id} className="h-1 flex-1 overflow-hidden rounded bg-surface/35"><span key={`${current.story.id}-${i}`} style={i === current.storyIndex && story.media?.[0]?.type === 'VIDEO' ? { width: `${storyProgress}%` } : undefined} className={`block h-full origin-left bg-surface ${i < current.storyIndex ? 'w-full' : i === current.storyIndex && story.media?.[0]?.type !== 'VIDEO' ? 'animate-[story-progress_7s_linear_forwards]' : i === current.storyIndex ? '' : 'w-0'}`} /></span>)}</div>
+        <div className="absolute left-3 right-3 top-7 z-10 flex items-center gap-3 text-white"><Avatar ring={current.story.audience === 'CLOSE_FRIENDS' ? 'close' : false} src={current.group.user.image} name={current.group.user.username} size="xs" /><Link href={`/profile/${current.group.user.username}`} className="flex-1 text-sm font-medium">{current.group.user.username}</Link>{currentStoryMedia?.type === 'VIDEO' && storyHasAudio && <button type="button" aria-label={storyMuted ? 'Unmute story sound' : 'Mute story sound'} title={storyMuted ? 'Unmute sound' : 'Mute sound'} onClick={toggleStorySound} className="story-viewer-control grid h-9 w-9 place-items-center rounded-full text-white">{storyMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}</button>}<button type="button" aria-label="Close story" onClick={closeViewer} className="story-viewer-control grid h-9 w-9 place-items-center rounded-full text-white"><X /></button></div>
+        {currentMediaSource && !storyMediaError ? currentStoryMedia?.type === 'VIDEO' ? <video key={current.story.id} ref={(element) => { storyVideoRef.current = element; }} src={currentMediaSource} playsInline onCanPlay={(event) => { void startStoryPlayback(event.currentTarget); }} onLoadedMetadata={(event) => { const hasAudio = detectVideoAudio(event.currentTarget); setStoryHasAudio(hasAudio ?? true); setStoryMuted(event.currentTarget.muted); }} onVolumeChange={(event) => setStoryMuted(event.currentTarget.muted)} onTimeUpdate={(event) => { const video = event.currentTarget; if (Number.isFinite(video.duration) && video.duration > 0) setStoryProgress(Math.min(100, video.currentTime / video.duration * 100)); }} onError={() => setStoryMediaError(true)} onEnded={advance} className="h-full w-full object-contain" /> : <img src={currentMediaSource} onError={() => setStoryMediaError(true)} alt={current.story.caption || 'Story'} className="h-full w-full object-contain" /> : <div role="status" className="absolute inset-0 grid place-items-center p-8 text-center text-sm text-white/70">Story media is unavailable.</div>}
         {current.story.caption && <p className="absolute bottom-10 z-10 w-full px-8 text-center text-base text-white drop-shadow">{current.story.caption}</p>}
         {current.story.authorId !== session?.user?.id && <form onSubmit={replyToStory} className="absolute inset-x-3 bottom-4 z-20 flex gap-2"><input value={replyDraft} onChange={(event) => setReplyDraft(event.target.value)} onKeyDown={(event) => event.stopPropagation()} maxLength={1000} aria-label="Reply to story" placeholder="Reply to story…" className="min-w-0 flex-1 rounded-full border border-white/40 bg-black/45 px-4 py-2.5 text-sm text-white outline-none placeholder:text-white/70" /><button disabled={replyBusy || !replyDraft.trim()} className="rounded-full bg-surface px-4 py-2 text-sm font-semibold text-ink disabled:opacity-50">{replyBusy ? 'Sending…' : 'Send'}</button></form>}
         {current.story.authorId === session?.user?.id && <button onClick={showViewers} disabled={viewersBusy} className="absolute bottom-4 left-4 z-20 flex items-center gap-2 rounded-full bg-black/35 px-3 py-2 text-sm text-white"><Eye size={16} />{viewersBusy ? 'Loading…' : `${current.story._count?.views || 0} viewers`}</button>}

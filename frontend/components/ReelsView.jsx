@@ -11,6 +11,7 @@ import { useToast } from './Providers';
 import CommentsPanel from './CommentsPanel';
 import { flushRecoEvents, initRecoTrackerLifecycle, recoSessionId, trackReelEvent } from '../lib/recoTracker';
 import { adjacentReelIndex, createReelPlaybackController, createWheelNavigationGate, getReelNavigationDirection, readReelMutedPreference, setVideoMuted, writeReelMutedPreference } from '../lib/reelPlayback.mjs';
+import { createGuestReelsInvite } from '../lib/guestReelsInvite.mjs';
 
 export default function ReelsView() {
   const { data: session, status } = useSession();
@@ -22,6 +23,14 @@ export default function ReelsView() {
   const [playing, setPlaying] = useState({});
   const [muted, setMuted] = useState(false);
   const [activeReelId, setActiveReelId] = useState(null);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const guestSeen = useRef(null);
+  if (!guestSeen.current) guestSeen.current = createGuestReelsInvite();
+  const inviteDismissed = useRef(false);
+  const inviteResume = useRef(null);
+  const inviteFocus = useRef(null);
+  const inviteDialog = useRef(null);
+  const inviteOpenRef = useRef(false);
   const [liked, setLiked] = useState({});
   const [saved, setSaved] = useState({});
   const [relationships, setRelationships] = useState({});
@@ -69,6 +78,60 @@ export default function ReelsView() {
   const pauseReel = playbackRef.current.pause;
 
   useEffect(() => {
+    try { inviteDismissed.current = sessionStorage.getItem('gather-reels-invite-dismissed') === '1'; } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (!guestSeen.current(activeReelId, status, inviteDismissed.current) || composer || commentReel || shareReel || inviteOpen) return;
+    const video = videos.current.get(activeReelId);
+    inviteResume.current = video && !video.paused ? activeReelId : null;
+    inviteFocus.current = document.activeElement;
+    if (video && !video.paused) pauseReel(video, activeReelId);
+    inviteOpenRef.current = true;
+    setInviteOpen(true);
+  }, [activeReelId, status, composer, commentReel, shareReel, inviteOpen, pauseReel]);
+
+  const dismissInvite = () => {
+    inviteDismissed.current = true;
+    inviteOpenRef.current = false;
+    try { sessionStorage.setItem('gather-reels-invite-dismissed', '1'); } catch {}
+    setInviteOpen(false);
+    const id = inviteResume.current;
+    if (id && id === activeReelId) { const video = videos.current.get(id); if (video) void playReel(video, id); }
+    inviteFocus.current?.focus?.();
+  };
+
+  useEffect(() => {
+    if (!inviteOpen) return undefined;
+    inviteDialog.current?.querySelector('button')?.focus();
+    const onKey = (event) => {
+      if (event.key === 'Escape') { event.preventDefault(); dismissInvite(); }
+      if (event.key === 'Tab') {
+        const controls = [...inviteDialog.current.querySelectorAll('a[href], button:not(:disabled)')];
+        const first = controls[0], last = controls.at(-1);
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [inviteOpen]);
+
+  useEffect(() => {
+    if (!commentReel || desktopCommentsEnabled) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    const previousFocus = document.activeElement;
+    document.body.style.overflow = 'hidden';
+    const close = (event) => { if (event.key === 'Escape') setCommentReel(null); };
+    document.addEventListener('keydown', close);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', close);
+      previousFocus?.focus?.();
+    };
+  }, [commentReel, desktopCommentsEnabled]);
+
+  useEffect(() => {
     try {
       const savedPreference = readReelMutedPreference(window.sessionStorage);
       mutedPreference.current = savedPreference;
@@ -93,10 +156,11 @@ export default function ReelsView() {
   }, []);
 
   useEffect(() => {
+    if (status === 'loading') return undefined;
     let cancelled = false;
     initRecoTrackerLifecycle();
-    const path = status === 'authenticated' ? `/reels/feed?size=10&sessionId=${encodeURIComponent(recoSessionId())}` : '/reels?limit=24';
-    api(path)
+    const path = status === 'authenticated' ? `/reels/feed?size=10&sessionId=${encodeURIComponent(recoSessionId())}` : `/reels/discover?size=10&sessionId=${encodeURIComponent(recoSessionId())}`;
+    api(path, status === 'authenticated' ? {} : { method: 'POST', body: JSON.stringify({ excludeReelIds: [] }) })
       .then((data) => { if (!cancelled) { setHasMore(true); setReels(data.items || data.reels || []); } })
       .catch((error) => { if (!cancelled) notify(error.message, 'error'); })
       .finally(() => { if (!cancelled) setBusy(false); });
@@ -117,7 +181,7 @@ export default function ReelsView() {
           const state = tracking.current.get(reelId) || { visibleMs: 0, watchMs: 0, progressReportedMs: 0, maxProgressMs: 0, replayCount: 0, lastCurrent: 0, visible: false, viewableSent: false, playStarted: false };
           state.visible = true;
           tracking.current.set(reelId, state);
-          playReel(video, reelId);
+          if (!inviteOpenRef.current) playReel(video, reelId);
         } else {
           const state = tracking.current.get(reelId);
           if (state?.visible) {
@@ -191,13 +255,14 @@ export default function ReelsView() {
   };
 
   const loadMore = async () => {
-    if (status !== 'authenticated' || loadingMore.current || !hasMore) return null;
+    if (loadingMore.current || !hasMore) return null;
     loadingMore.current = true;
     setLoadingMoreState(true);
     try {
       const excludeReelIds = reels.map((reel) => reel.id);
       if (excludeReelIds.length > 5000) { setHasMore(false); return 0; }
-      const data = await api(`/reels/feed?size=10&sessionId=${encodeURIComponent(recoSessionId())}`, {
+      const route = status === 'authenticated' ? '/reels/feed' : '/reels/discover';
+      const data = await api(`${route}?size=10&sessionId=${encodeURIComponent(recoSessionId())}`, {
         method: 'POST', body: JSON.stringify({ excludeReelIds })
       });
       const loaded = new Set(excludeReelIds);
@@ -223,7 +288,7 @@ export default function ReelsView() {
   const navigateToReel = (index) => {
     if (index < 0) return;
     if (index >= visibleReels.length) {
-      if (status !== 'authenticated' || !hasMore) return;
+      if (!hasMore) return;
       pendingNavigationIndex.current = visibleReels.length;
       if (!loadingMore.current) {
         void loadMore().then((added) => { if (!added) pendingNavigationIndex.current = null; });
@@ -250,7 +315,7 @@ export default function ReelsView() {
 
   useEffect(() => {
     const handleKeyDown = (event) => {
-      if (composer || commentReel || shareReel) return;
+      if (composer || commentReel || shareReel || inviteOpen) return;
       if (event.target?.closest?.('[data-reel-comments]')) return;
       const direction = getReelNavigationDirection(event);
       if (!direction) return;
@@ -259,7 +324,7 @@ export default function ReelsView() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [composer, commentReel, shareReel, activeIndex, visibleReels.length, hasMore, status]);
+  }, [composer, commentReel, shareReel, inviteOpen, activeIndex, visibleReels.length, hasMore, status]);
 
   const toggleLike = async (reel) => {
     const post = reel.post;
@@ -353,7 +418,7 @@ export default function ReelsView() {
       setComposer(false);
       setFile(null);
       setCaption('');
-      const result = status === 'authenticated' ? await api(`/reels/feed?size=10&sessionId=${encodeURIComponent(recoSessionId())}`) : await api('/reels?limit=24');
+      const result = status === 'authenticated' ? await api(`/reels/feed?size=10&sessionId=${encodeURIComponent(recoSessionId())}`) : await api(`/reels/discover?size=10&sessionId=${encodeURIComponent(recoSessionId())}`, { method: 'POST', body: JSON.stringify({ excludeReelIds: [] }) });
       setHasMore(true);
       setReels(result.items || result.reels || []);
     } catch (error) {
@@ -425,20 +490,21 @@ export default function ReelsView() {
           <button onClick={() => { const video = videos.current.get(reel.id); if (!video) return; if (video.paused) playReel(video, reel.id); else pauseReel(video, reel.id); }} aria-label={playing[reel.id] ? 'Pause reel' : 'Play reel'} className="absolute left-4 top-4 grid h-10 w-10 place-items-center rounded-full bg-black/25 text-white backdrop-blur">{playing[reel.id] ? <Pause size={18} /> : <Play size={18} />}</button>
           <button type="button" onClick={() => { const video = videos.current.get(reel.id); if (!video) return; const next = !video.muted; mutedPreference.current = next; try { writeReelMutedPreference(window.sessionStorage, next); } catch {} setVideoMuted(video, next, setMuted); if (!next && video.paused) void playReel(video, reel.id); }} aria-label={muted ? 'Unmute sound' : 'Mute sound'} className="absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-full bg-black/25 text-white backdrop-blur">{muted ? <VolumeX size={18} /> : <Volume2 size={18} />}</button>
           <div className="absolute bottom-5 left-4 right-16"><div className="flex items-center gap-3"><Link href={`/profile/${reel.author.username}`} onClick={() => reel.impressionId && trackReelEvent({ type: 'PROFILE_OPEN', reelId: reel.id, impressionId: reel.impressionId })} className="flex min-w-0 items-center gap-2.5"><Avatar src={reel.author.image} name={reel.author.username} size="xs" /><span className="truncate text-sm font-semibold">@{reel.author.username}</span></Link>{reel.author.id !== session?.user?.id && <button onClick={() => toggleFollow(reel)} className="shrink-0 rounded-full border border-white/45 px-2.5 py-1 text-[10px] font-semibold hover:bg-surface/10">{relationship.following ? 'Following' : relationship.pending ? 'Requested' : 'Follow'}</button>}</div>{reel.caption && <p className="watch-reel-caption mt-3 line-clamp-3 text-sm leading-6">{reel.caption}</p>}</div>
-          <div className="absolute bottom-5 right-3 grid gap-4 text-center"><button aria-label={isLiked ? 'Unlike reel' : 'Like reel'} onClick={() => toggleLike(reel)} className={`grid place-items-center gap-1 ${isLiked ? 'text-coral' : 'text-white'}`}><Heart size={24} fill={isLiked ? 'currentColor' : 'none'} /><span className="text-[10px]">{reel.post?._count?.likes || 0}</span></button><button type="button" onClick={() => openComments(reel)} aria-label="Open comments" className="grid place-items-center gap-1"><MessageCircle size={23} /><span className="text-[10px]">{reel.post?._count?.comments || 0}</span></button><button aria-label={isSaved ? 'Unsave reel' : 'Save reel'} onClick={() => toggleSave(reel)}><Bookmark size={22} fill={isSaved ? 'currentColor' : 'none'} /></button><button aria-label="Share reel" onClick={() => share(reel)}><Share2 size={21} /></button><button aria-label="Not interested in this reel" onClick={() => hideReel(reel)}><EyeOff size={19} /></button></div>
+          <div className="absolute bottom-5 right-3 grid gap-4 text-center"><button aria-pressed={!!isLiked} aria-label={isLiked ? 'Unlike reel' : 'Like reel'} onClick={() => toggleLike(reel)} className={`grid place-items-center gap-1 ${isLiked ? 'text-coral' : 'text-white'}`}><Heart size={24} fill={isLiked ? 'currentColor' : 'none'} /><span className="text-[10px]">{reel.post?._count?.likes || 0}</span></button><button type="button" onClick={() => openComments(reel)} aria-label="Open comments" className="grid place-items-center gap-1"><MessageCircle size={23} /><span className="text-[10px]">{reel.post?._count?.comments || 0}</span></button><button aria-pressed={!!isSaved} aria-label={isSaved ? 'Unsave reel' : 'Save reel'} onClick={() => toggleSave(reel)}><Bookmark size={22} fill={isSaved ? 'currentColor' : 'none'} /></button><button aria-label="Share reel" onClick={() => share(reel)}><Share2 size={21} /></button><button aria-label="Not interested in this reel" onClick={() => hideReel(reel)}><EyeOff size={19} /></button></div>
         </div><aside className="watch-comments-panel hidden min-w-0 flex-col border-l border-line lg:flex" aria-label="Reel comments" onWheel={(event) => event.stopPropagation()}>
           <header className="flex items-center justify-between border-b border-line px-4 py-4"><h2 className="text-sm font-semibold">Comments</h2><span className="text-xs text-ink/45">{reel.post?._count?.comments || 0}</span></header>
           {desktopCommentsEnabled && reelIndex === activeIndex && reel.post?.id ? <CommentsPanel key={reel.id} postId={reel.post.id} postAuthorId={reel.author.id} recoImpressionId={reel.impressionId} onCommentAdded={(delta = 1) => updateReelCommentCount(reel.id, delta)} className="comments-panel--fill min-h-0 p-4" /> : <div className="min-h-0 flex-1" />}
         </aside></article>
           <nav className="watch-nav-stack hidden md:flex" aria-label="Reel navigation">
             <button type="button" aria-label="Previous Reel" title="Previous Reel" disabled={reelIndex === 0} onClick={() => navigateToReel(reelIndex - 1)} className="watch-nav-button glass-pill grid h-10 w-10 place-items-center border border-white/70 text-ink shadow-soft disabled:cursor-not-allowed disabled:opacity-35"><ArrowUp size={19} /></button>
-            <button type="button" aria-label="Next Reel" title="Next Reel" aria-busy={reelIndex === visibleReels.length - 1 && loadingMoreState} disabled={reelIndex === visibleReels.length - 1 && (loadingMoreState || !hasMore || status !== 'authenticated')} onClick={() => navigateToReel(reelIndex + 1)} className="watch-nav-button glass-pill grid h-10 w-10 place-items-center border border-white/70 text-ink shadow-soft disabled:cursor-not-allowed disabled:opacity-35">{reelIndex === visibleReels.length - 1 && loadingMoreState ? <LoaderCircle size={18} className="animate-spin" /> : <ArrowDown size={19} />}</button>
+            <button type="button" aria-label="Next Reel" title="Next Reel" aria-busy={reelIndex === visibleReels.length - 1 && loadingMoreState} disabled={reelIndex === visibleReels.length - 1 && (loadingMoreState || !hasMore)} onClick={() => navigateToReel(reelIndex + 1)} className="watch-nav-button glass-pill grid h-10 w-10 place-items-center border border-white/70 text-ink shadow-soft disabled:cursor-not-allowed disabled:opacity-35">{reelIndex === visibleReels.length - 1 && loadingMoreState ? <LoaderCircle size={18} className="animate-spin" /> : <ArrowDown size={19} />}</button>
           </nav>
         </div>;
       })}
       {!busy && !reels.length && <div className="mx-auto grid h-[60vh] max-w-md place-items-center rounded-3xl border border-line bg-surface p-10 text-center"><div><span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-mint text-moss"><Play /></span><h2 className="mt-4 font-semibold">No reels yet</h2></div></div>}
     </div>
 
+    {inviteOpen && typeof document !== 'undefined' && createPortal(<div className="fixed inset-0 z-[100] grid place-items-center bg-black/50 p-5" onWheel={(event) => event.preventDefault()} onTouchMove={(event) => event.preventDefault()}><section ref={inviteDialog} role="dialog" aria-modal="true" aria-labelledby="reels-invite-title" aria-describedby="reels-invite-description" className="glass-dialog reel-invite-dialog relative w-full max-w-sm p-7 text-ink"><button type="button" onClick={dismissInvite} aria-label="Close invitation" className="absolute right-4 top-4 rounded-full p-2 focus-visible:outline focus-visible:outline-2"><X size={20} /></button><h2 id="reels-invite-title" className="pr-8 text-xl font-bold">Make your feed yours ✨</h2><p id="reels-invite-description" className="mt-3 text-sm leading-6">Sign in to get personalized Reels based on what you love watching.</p><Link href="/login?returnTo=reels" className="mt-6 block rounded-xl bg-moss px-4 py-3 text-center font-semibold text-white focus-visible:outline focus-visible:outline-2">Sign in to Gather</Link><button type="button" onClick={dismissInvite} className="mt-3 w-full rounded-xl border border-line px-4 py-3 font-semibold focus-visible:outline focus-visible:outline-2">Continue watching</button></section></div>, document.body)}
     {undoReelId && <div role="status" className="fixed bottom-5 left-1/2 z-40 flex -translate-x-1/2 items-center gap-4 rounded-full bg-ink px-4 py-3 text-sm text-white shadow-soft">Reel hidden<button type="button" className="font-semibold text-mint" onClick={() => { if (hideTimer.current) window.clearTimeout(hideTimer.current); setHiddenReels((items) => items.filter((id) => id !== undoReelId)); setUndoReelId(null); }}>Undo</button></div>}
 
     {commentReel && !desktopCommentsEnabled && typeof document !== 'undefined' && createPortal(<div role="dialog" aria-modal="true" aria-label="Comments" className="fixed inset-0 z-50 bg-[rgba(10,12,20,.4)] p-0 backdrop-blur-md lg:hidden sm:grid sm:place-items-center sm:p-5" onMouseDown={(event) => { if (event.target === event.currentTarget) closeComments(); }}>

@@ -65,7 +65,7 @@ async function sessionUserFromCookie(cookieHeader) {
       const changedAtMs = databaseUser.passwordChangedAt ? new Date(databaseUser.passwordChangedAt).getTime() : null;
       const authAtMs = authAt ? (authAt > 1_000_000_000_000 ? authAt : authAt * 1000) : null;
       if (changedAtMs && (!authAtMs || authAtMs < changedAtMs)) return null;
-      return { id: userId, email: payload.email, name: payload.name, username: payload.username, authAt };
+      return { id: userId, name: payload.name, username: payload.username, authAt };
     }
   } catch { /* Invalid, expired, or malformed session cookie. */ }
   return null;

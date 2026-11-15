@@ -6,6 +6,8 @@ const { persistUpload, removeLocal } = require('../services/storage');
 const { getBlockedUserIds } = require('../services/blocks');
 const { mutedIdsFor } = require('../services/relations');
 const recommender = require('../services/recommender');
+const { sampleCatalogue, selectDiverse } = require('../services/recommender/discovery');
+const { buildReelCandidateWhere } = require('../services/recommender/rankingPolicy');
 const { randomUUID } = require('node:crypto');
 const { buildUserFeatureSnapshot, buildReelFeatureSnapshot, mergeForModel } = require('../services/recoFeatureSchema');
 
@@ -138,4 +140,44 @@ async function feed(req, res) {
   return ok(res, { ...response, items });
 }
 
-module.exports = { list, create, feed };
+async function guestFeed(req, res) {
+  const parsed = feedPageSchema.safeParse(req.body);
+  if (!parsed.success) throw new HttpError(400, 'VALIDATION_ERROR', 'Send up to 5000 previously loaded Reel IDs.');
+  const size = Math.min(Math.max(Math.trunc(Number(req.query.size)) || 10, 1), 20);
+  const sessionId = String(req.query.sessionId || '').slice(0, 128);
+  if (!sessionId) throw new HttpError(400, 'VALIDATION_ERROR', 'A session ID is required.');
+  const excluded = [...new Set(parsed.data.excludeReelIds)];
+  const where = {
+    ...buildReelCandidateWhere({ userId: '__guest__', excludedIds: excluded }),
+    media: { some: { url: { not: '' }, sizeBytes: { gt: 0 } } }
+  };
+  const previous = excluded.slice(-9);
+  const recent = previous.length ? await prisma.reel.findMany({
+    where: { id: { in: previous } }, select: { id: true, authorId: true }
+  }) : [];
+  const byId = new Map(recent.map((reel) => [reel.id, reel.authorId]));
+  const candidates = await sampleCatalogue(prisma, {
+    where, select: { id: true, authorId: true },
+    seed: JSON.stringify([sessionId, previous.at(-1)]), limit: size
+  });
+  const balanced = selectDiverse(candidates.map((reel) => ({
+    reelId: reel.id, creatorId: reel.authorId
+  })), { limit: size, recentCreators: previous.map((id) => byId.get(id)).filter(Boolean) });
+  const reels = balanced.length ? await prisma.reel.findMany({
+    where: { AND: [where, { id: { in: balanced.map((item) => item.reelId) } }] },
+    include: {
+      author: { select: { id: true, username: true, image: true, profile: { select: { displayName: true, visibility: true } } } },
+      media: true,
+      post: { include: { _count: { select: { likes: true, comments: true } } } }
+    }
+  }) : [];
+  const byReel = new Map(reels.map((reel) => [reel.id, reel]));
+  res.set('Cache-Control', 'private, no-store');
+  return ok(res, { items: balanced.flatMap(({ reelId }) => {
+    const reel = byReel.get(reelId);
+    return reel?.media.some((media) => typeof media.url === 'string' && media.url.trim() && media.sizeBytes > 0)
+      ? [{ ...reel, post: reel.post ? { ...reel.post, isLiked: false, isBookmarked: false } : null }] : [];
+  }) });
+}
+
+module.exports = { list, create, feed, guestFeed };
